@@ -33,7 +33,7 @@ for platform in "${PLATFORMS[@]}"; do
 
   mkdir -p "$stage"
   CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" GOARM="$goarm" \
-    go build -trimpath -ldflags "$LDFLAGS" -o "${stage}/${bin}" .
+    go build -trimpath -ldflags "$LDFLAGS" -o "${stage}/${bin}" ./cmd/speedtaier
   cp README.md "$stage/"
   [[ -f LICENSE ]] && cp LICENSE "$stage/"
 

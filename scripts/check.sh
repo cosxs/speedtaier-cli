@@ -48,13 +48,13 @@ if ! $quick; then
 
   step "交叉编译"
   for platform in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64; do
-    GOOS="${platform%/*}" GOARCH="${platform#*/}" CGO_ENABLED=0 go build -o "$tmp/cross" . && echo "  $platform"
+    GOOS="${platform%/*}" GOARCH="${platform#*/}" CGO_ENABLED=0 go build -o "$tmp/cross" ./cmd/speedtaier && echo "  $platform"
   done
 fi
 
 step "CLI 冒烟测试"
 bin="$tmp/speedtaier$(go env GOEXE)"
-go build -o "$bin" .
+go build -o "$bin" ./cmd/speedtaier
 "$bin" --help >/dev/null
 "$bin" version
 "$bin" --threads 0 >/dev/null 2>&1 && { echo "非法参数应当失败"; exit 1; }

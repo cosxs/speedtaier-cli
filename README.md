@@ -25,14 +25,16 @@ shasum -a 256 -c checksums-sha256.txt --ignore-missing
 **使用 go install**(需要 Go 1.26+)：
 
 ```bash
-go install github.com/cosxs/speedtaier-cli@latest
+go install github.com/cosxs/speedtaier-cli/cmd/speedtaier@latest
 ```
+
+go install 使用本机的 Go 版本编译；预编译版本固定使用已修复已知漏洞的 Go 版本构建，建议优先使用。
 
 **从源码构建**：
 
 ```bash
 git clone https://github.com/cosxs/speedtaier-cli.git && cd speedtaier-cli
-go build -o speedtaier .
+go build -o speedtaier ./cmd/speedtaier
 ```
 
 ## 快速开始
@@ -213,6 +215,7 @@ go test -run='^$' -fuzz='^FuzzParseNodes$' -fuzztime=30s ./internal/taier   # �
 推送 `v*` 标签时，GitHub Actions 会运行检查、构建并创建 Release。
 
 ```
+cmd/speedtaier/  程序入口
 internal/
   cli/       命令行参数、终端界面、JSON 输出
   runner/    编排：选省份 → 选出口网卡 → 探测 → 按运营商测速；产出 Result
