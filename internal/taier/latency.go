@@ -3,6 +3,7 @@ package taier
 import (
 	"bufio"
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -33,30 +34,33 @@ func dialPinger(ctx context.Context, d Dialer, addr string, timeout time.Duratio
 		req:  []byte("GET / HTTP/1.1\r\nHost: " + addr + "\r\nUser-Agent: " + uaAndroid + "\r\n\r\n"),
 		stop: context.AfterFunc(ctx, func() { _ = conn.SetDeadline(time.Now()) }),
 	}
-	if _, err := p.ping(timeout); err != nil {
+	_, reusable, err := p.ping(timeout)
+	if err == nil && !reusable {
+		err = errors.New("节点不支持长连接")
+	}
+	if err != nil {
 		p.close()
 		return nil, err
 	}
 	return p, nil
 }
 
-func (p *pinger) ping(timeout time.Duration) (time.Duration, error) {
+// ping 发送一次请求。err 为 nil 表示收到响应、rtt 有效；reusable 为 false 表示连接不能继续使用。
+// 成功与否不能用 rtt > 0 判断：Windows 时钟精度较低，本机回环的往返可能测得 0。
+func (p *pinger) ping(timeout time.Duration) (rtt time.Duration, reusable bool, err error) {
 	_ = p.conn.SetDeadline(time.Now().Add(timeout))
 	start := time.Now()
 	if _, err := p.conn.Write(p.req); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	resp, err := http.ReadResponse(p.br, nil)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	rtt := time.Since(start)
-	_, err = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBody))
+	rtt = time.Since(start)
+	_, drainErr := io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBody))
 	_ = resp.Body.Close()
-	if err == nil && resp.Close {
-		err = io.EOF // 节点不保持连接，后续请求需重新建连
-	}
-	return rtt, err
+	return rtt, drainErr == nil && !resp.Close, nil
 }
 
 func (p *pinger) close() {
@@ -81,11 +85,11 @@ func (s *sampler) next(ctx context.Context) (rtt time.Duration, ok bool) {
 		}
 		s.p = p
 	}
-	rtt, err := s.p.ping(s.timeout)
-	if err != nil {
+	rtt, reusable, err := s.p.ping(s.timeout)
+	if err != nil || !reusable {
 		s.close()
 	}
-	return rtt, rtt > 0
+	return rtt, err == nil
 }
 
 func (s *sampler) close() {

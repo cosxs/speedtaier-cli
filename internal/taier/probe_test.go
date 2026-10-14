@@ -136,3 +136,23 @@ func TestMeasureLatency(t *testing.T) {
 		t.Errorf("closed server: %+v, want 100%% failures", st)
 	}
 }
+
+// 节点每次响应后都关闭连接时，无法在长连接上测往返时延：探测判为不可达，时延采样全部失败。
+func TestPingerRequiresKeepAlive(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Connection", "close")
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	addr := srv.Listener.Addr().String()
+
+	if _, err := dialPinger(context.Background(), Dialer{}, addr, time.Second); err == nil {
+		t.Error("dialPinger: want error for non keep-alive node")
+	}
+	if st := measureLatency(context.Background(), Dialer{}, addr, 2, time.Second); st.Samples != 0 || st.Failed != 2 {
+		t.Errorf("measureLatency = %+v, want all failed", st)
+	}
+	if r := probeAddr(context.Background(), Dialer{}, addr); r.State != ReachFailed {
+		t.Errorf("probeAddr = %+v, want failed", r)
+	}
+}

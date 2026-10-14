@@ -111,16 +111,20 @@ func probeAddr(ctx context.Context, d Dialer, addr string) Reach {
 	}
 	defer p.close()
 	var best time.Duration
+	ok := false
 	for range probeSamples {
-		rtt, err := p.ping(probeTimeout)
-		if rtt > 0 && (best == 0 || rtt < best) {
-			best = rtt
-		}
+		rtt, reusable, err := p.ping(probeTimeout)
 		if err != nil {
 			break
 		}
+		if !ok || rtt < best {
+			best, ok = rtt, true
+		}
+		if !reusable {
+			break
+		}
 	}
-	if best == 0 {
+	if !ok {
 		return Reach{State: ReachFailed}
 	}
 	return Reach{State: ReachOK, RTT: best}
