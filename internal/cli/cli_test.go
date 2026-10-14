@@ -25,7 +25,7 @@ func TestFlags(t *testing.T) {
 		t.Errorf("parsed config = %+v", c)
 	}
 	// 已移除的参数按未知参数报错。
-	for _, flag := range []string{"--json", "--imei", "--latency-count", "--non-interactive", "--bandwidth"} {
+	for _, flag := range []string{"--json", "--imei", "--non-interactive", "--bandwidth"} {
 		if err := a.newRootCmd().ParseFlags([]string{flag, "1"}); err == nil || !strings.Contains(err.Error(), "unknown flag") {
 			t.Errorf("%s: err = %v, want unknown flag", flag, err)
 		}
@@ -69,6 +69,16 @@ func TestTestOptionsTimeout(t *testing.T) {
 	}
 	if _, err := run("--threads", "0"); err == nil {
 		t.Error("--threads 0: want error")
+	}
+	// --latency-count 默认 20，可调整，小于 1 时报错。
+	if o, err := run(); err != nil || o.LatencyCount != 20 {
+		t.Errorf("default latency count: %d, %v", o.LatencyCount, err)
+	}
+	if o, err := run("--latency-count", "50"); err != nil || o.LatencyCount != 50 {
+		t.Errorf("--latency-count 50: %d, %v", o.LatencyCount, err)
+	}
+	if _, err := run("--latency-count", "0"); err == nil {
+		t.Error("--latency-count 0: want error")
 	}
 }
 
