@@ -108,12 +108,6 @@ func (a *app) newRootCmd() *cobra.Command {
 	pf.StringVar(&a.cfg.iface, "interface", runner.InterfaceAuto,
 		"测速使用的网卡: auto(检测到透明代理时自动绑定物理网卡)、none(按系统路由)或网卡名如 en0")
 	pf.BoolVar(&a.cfg.json, "json", false, "向 stdout 输出单个 JSON 文档(不显示进度)")
-	// 以下参数已无作用，保留以免旧脚本报错：早期版本会交互选择省份；
-	// --bandwidth 只是握手时申报的数字，节点并不据此限速。
-	pf.Bool("non-interactive", false, "无作用，保留以兼容旧脚本")
-	_ = pf.MarkHidden("non-interactive")
-	pf.Int("bandwidth", 0, "无作用，保留以兼容旧脚本")
-	_ = pf.MarkHidden("bandwidth")
 	pf.BoolVar(&a.cfg.noProgress, "no-progress", false, "关闭实时进度")
 	pf.BoolVar(&a.cfg.noUpdateCheck, "no-update-check", false, "不检查新版本(也可设置环境变量 "+noUpdateCheckEnv+"=1)")
 	_ = cmd.RegisterFlagCompletionFunc("province",

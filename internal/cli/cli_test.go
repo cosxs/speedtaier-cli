@@ -19,12 +19,8 @@ func newTestApp(t *testing.T, args ...string) *app {
 
 func TestFlags(t *testing.T) {
 	a := newTestApp(t, "--family", "ipv6", "--province", "shandong", "--interface", "en0", "--operator", "all",
-		"--json", "--non-interactive")
+		"--json")
 	c := a.cfg
-	// --non-interactive、--bandwidth 已无作用，但仍须能解析，以兼容旧脚本。
-	if err := a.newRootCmd().ParseFlags([]string{"--bandwidth", "100", "--non-interactive"}); err != nil {
-		t.Errorf("legacy flags: %v", err)
-	}
 	if c.family.mode != runner.Family6 || c.province != "shandong" || c.iface != "en0" || c.operator != runner.OperatorAll ||
 		!c.json {
 		t.Errorf("parsed config = %+v", c)
