@@ -1,0 +1,12 @@
+# 构建产物
+/speedtaier
+/speedtaier.exe
+/dist/
+
+# 测试产物
+*.test
+*.out
+coverage.*
+
+# 系统文件
+.DS_Store

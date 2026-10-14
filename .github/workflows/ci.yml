@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      # gofmt、vet、go fix、staticcheck、测试(含竞态检测)、govulncheck、交叉编译与 CLI 冒烟测试
+      - name: 质量检查
+        shell: bash
+        run: scripts/check.sh
+
+  fuzz:
+    name: fuzz (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [FuzzParseNodes, FuzzParseDoValid, FuzzDecryptServerList, FuzzMeter]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: 模糊测试
+        run: go test -run='^$' -fuzz='^${{ matrix.target }}$' -fuzztime=60s ./internal/taier
+      - name: 上传触发失败的输入
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-${{ matrix.target }}
+          path: internal/taier/testdata/fuzz

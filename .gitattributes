@@ -1,0 +1,4 @@
+# 统一使用 LF：Windows 上检出 CRLF 会让 gofmt 报告格式问题、让 bash 脚本无法执行。
+* text=auto eol=lf
+*.tar.gz binary
+*.zip binary
