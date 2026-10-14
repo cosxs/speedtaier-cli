@@ -12,11 +12,52 @@
 - **识别透明代理**：检测到 Surge、Clash、sing-box 等 TUN 模式时，测速流量自动改由物理网卡直接发出，避免结果失真。
 - **IPv4 / IPv6 双栈**：本机有 IPv6 路由时自动加测 IPv6。
 - **适合脚本**：`--json` 输出稳定结构的单行 JSON，带警告编码与退出码。
-- **单一静态二进制**：支持 macOS、Linux、Windows。
+- **单一静态二进制**：支持 macOS、Linux、Windows，以及 OpenWrt/iStoreOS 等[软路由](#软路由)(x86、ARM、MIPS)，提供一键安装脚本。
 
 ## 安装
 
-**下载预编译版本**：从 GitHub Releases 下载对应平台的压缩包，解压后将 `speedtaier` 放入 `PATH`。可用 `checksums-sha256.txt` 校验：
+### 一键安装
+
+适用于 macOS、Linux 以及 OpenWrt/iStoreOS 等软路由：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cosxs/speedtaier-cli/main/scripts/install.sh | sh
+```
+
+没有 curl 的系统(如 OpenWrt)使用 wget：
+
+```bash
+wget -qO- https://raw.githubusercontent.com/cosxs/speedtaier-cli/main/scripts/install.sh | sh
+```
+
+脚本兼容 POSIX sh(包括 BusyBox ash)，会自动识别系统与架构，下载最新版并校验 sha256 后安装：root 安装到 `/usr/local/bin` 或 `/usr/bin`，普通用户安装到 `~/.local/bin`。再次运行即升级。可通过环境变量调整(放在 `sh` 前，如 `... | VERSION=v0.6.2 sh`)：
+
+| 变量 | 说明 |
+|---|---|
+| `VERSION` | 安装指定版本，如 `v0.6.2`；默认最新版 |
+| `INSTALL_DIR` | 安装目录 |
+| `GITHUB_PROXY` | GitHub 下载加速前缀，最终地址为 前缀 + 原始地址 |
+| `ARCH` | 跳过自动检测，指定 `amd64`、`arm64`、`armv7`、`386`、`mips`、`mipsle` |
+
+访问 GitHub 困难时，可以给脚本地址和下载地址都加上 GitHub 加速服务的前缀：
+
+```bash
+curl -fsSL https://加速服务地址/https://raw.githubusercontent.com/cosxs/speedtaier-cli/main/scripts/install.sh | GITHUB_PROXY=https://加速服务地址/ sh
+```
+
+加速服务能看到并修改经过它的全部内容(包括校验文件)，请只使用可信的服务。
+
+卸载：
+
+```bash
+rm "$(command -v speedtaier)"
+```
+
+### 其他方式
+
+**Windows**：从 [Releases](https://github.com/cosxs/speedtaier-cli/releases/latest) 下载 `speedtaier-windows-amd64.zip`，解压后运行 `speedtaier.exe`。
+
+**手动下载**：从 Releases 下载对应平台的压缩包，解压后将 `speedtaier` 放入 `PATH`。可用 `checksums-sha256.txt` 校验：
 
 ```bash
 shasum -a 256 -c checksums-sha256.txt --ignore-missing
@@ -98,6 +139,33 @@ speedtaier --interface none    # 按系统路由，即经过代理测速
 ```
 
 绑定网卡在 macOS 与 Linux 上可用(Linux 较旧的内核需要 `CAP_NET_RAW` 权限)；其他平台绑定失败时会给出警告并退回按系统路由测速。
+
+## 软路由
+
+在路由器上直接测速，测的是 WAN 口线路本身，排除了 Wi-Fi、内网与电脑性能的影响。
+
+| 设备 | 架构 | 发布包 |
+|---|---|---|
+| x86 软路由(J4125、N100 等) | x86_64 | `linux-amd64` |
+| R2S/R4S/R5S、RK3568/RK3588、N1 等 | ARM64 | `linux-arm64` |
+| 32 位 ARM 设备 | ARMv7 | `linux-armv7` |
+| MT7621 等刷 OpenWrt 的硬路由 | MIPS 小端 | `linux-mipsle` |
+| 部分高通 ath79 等设备 | MIPS 大端 | `linux-mips` |
+
+一键安装脚本会自动选择合适的包(MIPS 的大小端从 `/etc/openwrt_release` 或系统程序的文件头判断)。程序为静态编译，不依赖系统 C 库，测速时内存占用约 30 MB。
+
+注意事项：
+
+- **存储空间**：解压后约 9–11 MB。闪存较小(如 16 MB)的设备可以安装到内存盘，重启后需要重新安装：
+  ```bash
+  wget -qO- https://raw.githubusercontent.com/cosxs/speedtaier-cli/main/scripts/install.sh | INSTALL_DIR=/tmp sh
+  ```
+- **CPU 可能成为瓶颈**：性能较弱的设备(MIPS、Cortex-A53 级 ARM)可能跑不满千兆。测速时可用 `top` 观察，CPU 占满说明结果受限于路由器本身；MIPS 设备的结果只适合作参考。
+- **PPPoE 拨号与代理插件**：PPPoE 的 WAN 口(如 `pppoe-wan`)不会被误判为代理；OpenClash 等插件的 TUN 模式会被识别，测速连接自动绑定 WAN 口绕开代理。只代理局域网设备流量的 iptables/nftables 透明代理不影响路由器自身的测速。
+- **定时测速**：交互选择需要终端，定时任务中请指定省份，结果按行追加为 JSON。每次测速约消耗 1–2 GB 流量，请控制频率。以 OpenWrt 为例，执行 `crontab -e` 添加：
+  ```
+  0 4 * * * /usr/bin/speedtaier --province jiangsu --json --non-interactive >> /root/speedtaier.jsonl 2>/dev/null
+  ```
 
 ## JSON 输出
 
@@ -198,15 +266,16 @@ speedtaier --interface none    # 按系统路由，即经过代理测速
 | `dlcv2.cnspeedtest.cn:8443` | 配置清单、IP 归属地、IPv6 节点匹配 |
 | `down.cnspeedtest.cn:8043`(以配置清单为准) | 加密的全量节点库 |
 | 各测速节点 TCP `65499`、`9443` 端口 | 时延探测、鉴权、下载、上传 |
+| `raw.githubusercontent.com`、`github.com` | 仅一键安装脚本使用：下载脚本与发布包 |
 
-检测 IPv6 路由与透明代理时只做本机路由查找，不发送数据。节点库缓存在系统缓存目录下的 `speedtaier/` 中(macOS 为 `~/Library/Caches`，Linux 为 `~/.cache`)，按配置清单的 MD5 校验，内容未变化时不重复下载。
+检测 IPv6 路由与透明代理时只做本机路由查找，不发送数据。节点库缓存在系统缓存目录下的 `speedtaier/` 中(macOS 为 `~/Library/Caches`，Linux 为 `~/.cache`)，按配置清单的 MD5 校验，内容未变化时不重复下载；卸载时可一并删除。
 
 ## 开发
 
 需要 Go 1.26+；项目通过 `go.mod` 的 `toolchain` 指令固定构建工具链版本，开发工具(staticcheck、govulncheck)通过 `tool` 指令固定，无需全局安装。
 
 ```bash
-scripts/check.sh            # gofmt、vet、go fix、staticcheck、测试(含竞态检测)、govulncheck、交叉编译、冒烟测试
+scripts/check.sh            # gofmt、vet、go fix、staticcheck、shellcheck、测试(含竞态检测)、govulncheck、交叉编译、冒烟测试
 scripts/check.sh --quick    # 跳过竞态检测、漏洞扫描与交叉编译
 VERSION=v0.6.0 scripts/build.sh   # 构建多平台发布包到 dist/
 go test -run='^$' -fuzz='^FuzzParseNodes$' -fuzztime=30s ./internal/taier   # 模糊测试

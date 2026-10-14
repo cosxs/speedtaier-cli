@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"strings"
 	"syscall"
 )
 
@@ -45,17 +46,23 @@ func DetectTUN(target netip.Addr) (string, bool) {
 	if ifi == nil {
 		return "", fakeIPRange.Contains(local)
 	}
-	return ifi.Name, isTUN(ifi.Flags, local)
+	return ifi.Name, isTUN(ifi, local)
 }
 
-// isTUN：TUN/utun 是点对点接口；源地址落在虚拟地址段同样说明流量进入了代理。
-func isTUN(flags net.Flags, local netip.Addr) bool {
-	return flags&net.FlagPointToPoint != 0 || fakeIPRange.Contains(local)
+// isTUN 判断流量是否进入了透明代理：出口是 TUN 设备，或源地址落在代理使用的虚拟地址段。
+func isTUN(ifi *net.Interface, local netip.Addr) bool {
+	return fakeIPRange.Contains(local) || isTunDevice(ifi)
 }
 
-// physical 判断网卡能否作为绕开代理的出口：已启用、非回环、非点对点。
-func physical(ifi *net.Interface) bool {
-	return ifi.Flags&net.FlagUp != 0 && ifi.Flags&(net.FlagLoopback|net.FlagPointToPoint) == 0
+// pointToPointTun 是无法识别设备类型时的兜底判断：TUN 是点对点接口，
+// 但 PPPoE 拨号的 WAN 口(ppp0、pppoe-wan)同样是点对点接口，需要排除。
+func pointToPointTun(ifi *net.Interface) bool {
+	return ifi.Flags&net.FlagPointToPoint != 0 && !strings.HasPrefix(ifi.Name, "ppp")
+}
+
+// usable 判断网卡能否作为绕开代理的出口：已启用、非回环、非 TUN。
+func usable(ifi *net.Interface) bool {
+	return ifi.Flags&net.FlagUp != 0 && ifi.Flags&net.FlagLoopback == 0 && !isTunDevice(ifi)
 }
 
 func interfaceOf(ip netip.Addr) *net.Interface {

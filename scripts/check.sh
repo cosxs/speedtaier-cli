@@ -33,6 +33,15 @@ fi
 step "staticcheck"
 go tool staticcheck -checks=all,-ST1000,-ST1003 ./...
 
+step "shellcheck"
+# 以能否运行判断是否可用：版本管理器的占位命令存在但未配置版本时也会失败。
+if shellcheck --version >/dev/null 2>&1; then
+  shellcheck -s sh scripts/install.sh
+  shellcheck -S warning scripts/check.sh scripts/build.sh
+else
+  echo "  未安装 shellcheck，跳过"
+fi
+
 step "go test"
 go test -count=1 ./...
 
@@ -47,7 +56,7 @@ if ! $quick; then
   go tool govulncheck ./...
 
   step "交叉编译"
-  for platform in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64; do
+  for platform in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 linux/mipsle windows/amd64; do
     GOOS="${platform%/*}" GOARCH="${platform#*/}" CGO_ENABLED=0 go build -o "$tmp/cross" ./cmd/speedtaier && echo "  $platform"
   done
 fi

@@ -9,18 +9,24 @@ import (
 )
 
 func TestIsTUN(t *testing.T) {
+	p2p := net.FlagUp | net.FlagPointToPoint
 	tests := []struct {
+		name  string
 		flags net.Flags
 		local string
 		want  bool
 	}{
-		{net.FlagUp | net.FlagPointToPoint, "10.0.0.2", true}, // utun/tun
-		{net.FlagUp | net.FlagBroadcast, "198.18.0.1", true},  // 虚拟地址段
-		{net.FlagUp | net.FlagBroadcast, "192.168.1.10", false},
+		{"utun4", p2p, "10.0.0.2", true}, // Surge、VPN 的 utun
+		{"tun0", p2p, "10.0.0.2", true},
+		{"pppoe-wan", p2p, "100.64.1.2", false}, // PPPoE 拨号的 WAN 口不是代理
+		{"ppp0", p2p, "100.64.1.2", false},
+		{"en0", net.FlagUp | net.FlagBroadcast, "198.18.0.1", true}, // 源地址在虚拟地址段
+		{"eth0", net.FlagUp | net.FlagBroadcast, "192.168.1.10", false},
 	}
 	for _, tt := range tests {
-		if got := isTUN(tt.flags, netip.MustParseAddr(tt.local)); got != tt.want {
-			t.Errorf("isTUN(%v, %s) = %v, want %v", tt.flags, tt.local, got, tt.want)
+		ifi := &net.Interface{Name: tt.name, Flags: tt.flags}
+		if got := isTUN(ifi, netip.MustParseAddr(tt.local)); got != tt.want {
+			t.Errorf("isTUN(%s, %s) = %v, want %v", tt.name, tt.local, got, tt.want)
 		}
 	}
 }
@@ -63,8 +69,8 @@ func TestPrimaryInterface(t *testing.T) {
 		t.Skipf("no primary interface here: %v", err)
 	}
 	ifi, err := net.InterfaceByName(name)
-	if err != nil || !physical(ifi) {
-		t.Errorf("PrimaryInterface() = %q, not a physical interface (%v)", name, err)
+	if err != nil || !usable(ifi) {
+		t.Errorf("PrimaryInterface() = %q, not a usable interface (%v)", name, err)
 	}
 	t.Logf("primary interface: %s", name)
 }
