@@ -32,20 +32,17 @@ func reachable(ctx context.Context, d Dialer, addr string, timeout time.Duration
 	return conn.Close()
 }
 
-// claimedBandwidthMbps 是握手时申报的带宽。节点并不据此限速(实测申报 100 与 200 的结果相同)，
-// 沿用官方客户端的常见取值。
-const claimedBandwidthMbps = 200
-
-func doValid(ctx context.Context, d Dialer, addr, imei string, bandwidth int, timeout time.Duration) (string, error) {
+// doValid 向节点申请测速会话，返回会话 key。官方客户端还会在请求里带一个 bandwidth 参数，
+// 实测不带时握手同样成功(电信、联通、移动共 6 个节点验证过)，因此不发送。
+func doValid(ctx context.Context, d Dialer, addr, imei string, timeout time.Duration) (string, error) {
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
 	q := url.Values{
-		"key":       {""},
-		"flag":      {"true"},
-		"bandwidth": {strconv.Itoa(bandwidth)},
-		"model":     {"Android"},
-		"imei":      {imei},
-		"time":      {ts},
-		"token":     {token(imei, ts)},
+		"key":   {""},
+		"flag":  {"true"},
+		"model": {"Android"},
+		"imei":  {imei},
+		"time":  {ts},
+		"token": {token(imei, ts)},
 	}
 	code, body, err := rawRequest(ctx, d, addr, "GET", "/speed/dovalid?"+q.Encode(),
 		[][2]string{{"Connection", "close"}, {"User-Agent", uaAndroid}}, timeout)

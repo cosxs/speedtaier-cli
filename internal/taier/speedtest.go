@@ -200,7 +200,7 @@ func RunTest(ctx context.Context, node Node, family Family, opts Options) Result
 	if res.IMEI == "" {
 		res.IMEI = newIMEI()
 	}
-	uuid, err := doValid(ctx, opts.Dialer, addr, res.IMEI, claimedBandwidthMbps, 4*time.Second)
+	uuid, err := doValid(ctx, opts.Dialer, addr, res.IMEI, 4*time.Second)
 	if err != nil {
 		res.Error = err.Error()
 		return res
