@@ -1,4 +1,4 @@
-// Package runner 编排一次完整的测速：确定省份、选择出口网卡、探测节点连通性、按运营商测速，
+// Package runner 编排一次完整的测速：确定省份与运营商、选择出口网卡、探测节点连通性、按运营商测速，
 // 并产出可序列化为 JSON 的 Result。界面通过 Reporter 接收过程事件，不参与业务逻辑。
 package runner
 
@@ -9,9 +9,6 @@ import (
 
 	"github.com/cosxs/speedtaier-cli/internal/taier"
 )
-
-// ErrInterrupted 表示用户中断(如在交互选择中按下 Ctrl-C)。
-var ErrInterrupted = errors.New("已中断")
 
 // FamilyMode 决定测速使用的协议族。
 type FamilyMode string
@@ -57,17 +54,21 @@ const (
 	InterfaceNone = "none" // 始终按系统路由
 )
 
+// --operator 的特殊取值。
+const (
+	OperatorAuto = "auto" // 只测本机运营商(按归属地)，无法确定时测时延最低的节点
+	OperatorAll  = "all"  // 每个运营商各测一个节点
+)
+
 // Config 是一次运行的全部输入。
 type Config struct {
-	Province   string     // 省份拼音；空表示交互选择或按归属地确定
+	Province   string     // 省份拼音；空表示按归属地确定
 	Family     FamilyMode // 空等同 FamilyAuto
 	Interface  string     // auto、none 或网卡名；空等同 auto
+	Operator   string     // auto、all 或运营商名(中文、拼音或英文，如 联通、unicom)；空等同 auto
 	Test       taier.Options
 	SurveyOnly bool   // 只探测节点连通性，不测速(list 命令)
 	Version    string // 工具版本，写入结果便于追溯
-
-	// ChooseProvince 在未指定省份时交互选择，home 为归属地省份(可能为空)；nil 表示非交互，直接使用归属地。
-	ChooseProvince func(provinces []string, home string) (string, error)
 
 	// Sources 提供外部数据，零值字段使用官方接口；测试中可替换为本地数据。
 	Sources Sources

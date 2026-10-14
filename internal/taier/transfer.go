@@ -41,9 +41,9 @@ const (
 
 func (m transferMode) String() string {
 	if m == transferUpload {
-		return "上传"
+		return PhaseUpload
 	}
-	return "下载"
+	return PhaseDownload
 }
 
 // measureTransfer 用 opts.Threads 条连接持续传输并计量吞吐：
@@ -84,36 +84,51 @@ func measureTransfer(parent context.Context, addr string, mode transferMode, uui
 
 	progress := func(u ProgressUpdate) {
 		if opts.OnProgress != nil {
-			u.Phase = mode.String()
+			u.Phase, u.Threads = mode.String(), opts.Threads
 			opts.OnProgress(u)
 		}
 	}
 	m := meter{start: start, grace: grace, min: minMeasure, max: limit}
+	budget := grace + limit // 本阶段最长时长，用于估算进度
 	ticker := time.NewTicker(sampleInterval)
 	defer ticker.Stop()
 loop:
 	for {
 		select {
 		case <-ticker.C:
-			mbps, warmup, stop := m.observe(time.Now(), counter.Load())
+			now := time.Now()
+			mbps, warmup, stop := m.observe(now, counter.Load())
 			if stop {
 				break loop
 			}
-			progress(ProgressUpdate{Mbps: mbps, Warmup: warmup})
+			u := ProgressUpdate{Mbps: mbps, Warmup: warmup, Bytes: counter.Load(), Total: now.Sub(start),
+				Fraction: min(1, float64(now.Sub(start))/float64(budget))}
+			// 负载时延：预热期间展示到目前为止的全部样本，让数据第一时间出现；预热结束后只统计预热之后的样本，
+			// 与最终结果口径一致。刚结束预热、还没有预热之后的样本时沿用全部样本，避免显示闪回空白。
+			if u.Latency = probe.stats(m.measureStart()); u.Latency.Samples == 0 {
+				u.Latency = probe.stats(start)
+			}
+			progress(u)
 		case <-streamsDone: // 所有连接都已放弃
 			break loop
 		case <-ctx.Done():
 			break loop
 		}
 	}
-	mbps, measured, stable := m.result(time.Now(), counter.Load())
+	ended := time.Now()
+	mbps, measured, stable := m.result(ended, counter.Load())
 	cancel()
 	<-streamsDone
 	loaded := probe.stop(m.measureStart())
-	progress(ProgressUpdate{Mbps: mbps, Final: true, Elapsed: measured, Stable: stable})
+	if parent.Err() == nil { // 被中断的阶段不报告"完成"，界面据此保留中断时的进度
+		progress(ProgressUpdate{Mbps: mbps, Fraction: 1, Final: true, Bytes: counter.Load(), Total: ended.Sub(start),
+			Elapsed: measured, Stable: stable, Latency: loaded})
+	}
 	return Transfer{
+		Threads:  opts.Threads,
 		Mbps:     mbps,
 		Bytes:    counter.Load(),
+		Total:    ended.Sub(start),
 		Duration: measured,
 		Stable:   stable,
 		Latency:  loaded,

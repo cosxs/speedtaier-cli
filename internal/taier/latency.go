@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"sync"
 	"time"
 )
 
@@ -140,10 +141,14 @@ func newLatencyStats(samples []time.Duration, failed int) LatencyStats {
 	return s
 }
 
-// measureLatency 采样 count 次空载往返时延。
-func measureLatency(ctx context.Context, d Dialer, addr string, count int, timeout time.Duration) LatencyStats {
+// defaultLatencyCount 是空载时延的默认采样次数；抖动需要足够多的样本才有意义。
+const defaultLatencyCount = 20
+
+// measureLatency 采样 count 次空载往返时延；每完成一次采样调用 onSample(截至目前的统计，完成比例)，可为 nil。
+func measureLatency(ctx context.Context, d Dialer, addr string, count int, timeout time.Duration,
+	onSample func(LatencyStats, float64)) LatencyStats {
 	if count < 1 {
-		count = 8
+		count = defaultLatencyCount
 	}
 	s := sampler{dialer: d, addr: addr, timeout: timeout}
 	defer s.close()
@@ -156,6 +161,9 @@ func measureLatency(ctx context.Context, d Dialer, addr string, count int, timeo
 			samples = append(samples, rtt)
 		case ctx.Err() == nil:
 			failed++
+		}
+		if onSample != nil && ctx.Err() == nil {
+			onSample(newLatencyStats(samples, failed), float64(i+1)/float64(count))
 		}
 		if i < count-1 && !sleepCtx(ctx, 80*time.Millisecond) {
 			break
@@ -172,9 +180,11 @@ const (
 
 // loadedProbe 在传输期间持续测量往返时延(负载时延)，反映链路排队与缓冲膨胀的程度。
 type loadedProbe struct {
-	cancel  context.CancelFunc
-	done    chan struct{}
-	samples []timedSample // 仅由采样 goroutine 写入，done 关闭后读取
+	cancel context.CancelFunc
+	done   chan struct{}
+
+	mu      sync.Mutex
+	samples []timedSample
 }
 
 type timedSample struct {
@@ -190,13 +200,15 @@ func startLoadedProbe(ctx context.Context, d Dialer, addr string) *loadedProbe {
 		defer close(lp.done)
 		s := sampler{dialer: d, addr: addr, timeout: loadedTimeout}
 		defer s.close()
-		for len(lp.samples) < maxLoadedSamples {
+		for range maxLoadedSamples {
 			at := time.Now()
 			rtt, ok := s.next(ctx)
 			if ctx.Err() != nil {
 				return // 结束时被打断的采样不计入
 			}
+			lp.mu.Lock()
 			lp.samples = append(lp.samples, timedSample{at: at, rtt: rtt, ok: ok})
+			lp.mu.Unlock()
 			if !sleepCtx(ctx, loadedInterval-time.Since(at)) {
 				return
 			}
@@ -205,10 +217,17 @@ func startLoadedProbe(ctx context.Context, d Dialer, addr string) *loadedProbe {
 	return lp
 }
 
-// stop 结束采样，只统计 since(预热结束)之后发起的样本。
+// stop 结束采样并返回最终统计。
 func (lp *loadedProbe) stop(since time.Time) LatencyStats {
 	lp.cancel()
 	<-lp.done
+	return lp.stats(since)
+}
+
+// stats 返回截至目前的统计，只统计 since(预热结束)之后发起的样本；可在采样期间调用。
+func (lp *loadedProbe) stats(since time.Time) LatencyStats {
+	lp.mu.Lock()
+	defer lp.mu.Unlock()
 	var samples []time.Duration
 	failed := 0
 	for _, s := range lp.samples {

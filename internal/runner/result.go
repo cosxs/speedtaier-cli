@@ -26,7 +26,7 @@ const (
 
 // 警告编码，供脚本按编码判断，不依赖文案。
 const (
-	CodeProvinceFromGeo  = "province_from_geo"  // 未指定省份，按归属地选择
+	CodeOperatorUnknown  = "operator_unknown"   // 无法按归属地确定本机运营商，测试时延最低的节点
 	CodeProxyBypassed    = "proxy_bypassed"     // 检测到透明代理，已绑定物理网卡绕开
 	CodeTransparentProxy = "transparent_proxy"  // 测速经过透明代理，结果可能失真
 	CodeIPv6LookupFailed = "ipv6_lookup_failed" // 部分运营商的 IPv6 节点获取失败
@@ -49,6 +49,7 @@ type Result struct {
 	Config         RunConfig   `json:"config"`
 	Client         *Client     `json:"client,omitempty"`
 	Province       string      `json:"province,omitempty"`
+	Operator       string      `json:"operator,omitempty"` // 测速的运营商，空表示不限运营商
 	Network        Network     `json:"network"`
 	Candidates     []Candidate `json:"candidates"`
 	Tests          []Test      `json:"tests"`
@@ -64,15 +65,15 @@ type RunConfig struct {
 	Province       string  `json:"province,omitempty"`
 	Family         string  `json:"family"`
 	Interface      string  `json:"interface"`
+	Operator       string  `json:"operator"`
 	Threads        int     `json:"threads"`
+	SingleThread   bool    `json:"single_thread"` // 另测单线程(Threads 为 1 时已是单线程，为 false)
 	MaxSeconds     int     `json:"max_seconds"`
-	Bandwidth      int     `json:"bandwidth"`
 	LatencyCount   int     `json:"latency_count"`
 	TimeoutSeconds float64 `json:"timeout_seconds"`
 	Download       bool    `json:"download"`
 	Upload         bool    `json:"upload"`
 	SurveyOnly     bool    `json:"survey_only"`
-	Interactive    bool    `json:"interactive"`
 }
 
 // Client 是本机出口 IP 及其归属地(来自官方归属地接口)。
@@ -139,9 +140,14 @@ type Test struct {
 	Node        *NodeRef  `json:"node,omitempty"`
 	Attempts    []Attempt `json:"attempts,omitempty"` // 此前测速失败的节点
 	IdleLatency *Latency  `json:"idle_latency,omitempty"`
-	Download    *Transfer `json:"download,omitempty"`
+	Download    *Transfer `json:"download,omitempty"` // 多线程(config.threads 条连接)
 	Upload      *Transfer `json:"upload,omitempty"`
-	Error       string    `json:"error,omitempty"`
+
+	// 单线程结果，仅在 config.single_thread 为 true 时有值。
+	DownloadSingle *Transfer `json:"download_single,omitempty"`
+	UploadSingle   *Transfer `json:"upload_single,omitempty"`
+
+	Error string `json:"error,omitempty"`
 }
 
 type Attempt struct {
@@ -162,9 +168,11 @@ type Latency struct {
 
 // Transfer 是一个传输方向的结果。
 type Transfer struct {
+	Threads       int      `json:"threads"` // 使用的连接数
 	Mbps          float64  `json:"mbps"`
 	Bytes         int64    `json:"bytes"`
-	DurationMs    int64    `json:"duration_ms"` // 计量时长，不含预热
+	TotalMs       int64    `json:"total_ms"`    // 阶段总用时，含预热；与 bytes 口径一致
+	DurationMs    int64    `json:"duration_ms"` // 计量时长，不含预热；mbps 按它计算
 	Stable        bool     `json:"stable"`      // 吞吐收敛后提前结束
 	LoadedLatency *Latency `json:"loaded_latency,omitempty"`
 	Errors        []string `json:"errors,omitempty"`
@@ -218,8 +226,10 @@ func transferOf(t taier.Transfer) *Transfer {
 		return nil
 	}
 	return &Transfer{
+		Threads:       t.Threads,
 		Mbps:          round2(t.Mbps),
 		Bytes:         t.Bytes,
+		TotalMs:       t.Total.Milliseconds(),
 		DurationMs:    t.Duration.Milliseconds(),
 		Stable:        t.Stable,
 		LoadedLatency: latencyOf(t.Latency),

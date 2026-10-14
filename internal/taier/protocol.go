@@ -32,6 +32,10 @@ func reachable(ctx context.Context, d Dialer, addr string, timeout time.Duration
 	return conn.Close()
 }
 
+// claimedBandwidthMbps 是握手时申报的带宽。节点并不据此限速(实测申报 100 与 200 的结果相同)，
+// 沿用官方客户端的常见取值。
+const claimedBandwidthMbps = 200
+
 func doValid(ctx context.Context, d Dialer, addr, imei string, bandwidth int, timeout time.Duration) (string, error) {
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
 	q := url.Values{

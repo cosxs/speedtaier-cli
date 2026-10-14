@@ -85,6 +85,56 @@ func TestParseNodes(t *testing.T) {
 	}
 }
 
+func TestLookupOperator(t *testing.T) {
+	for in, want := range map[string]string{
+		"电信":        "电信",
+		"中国联通":      "联通",
+		" Unicom ":  "联通",
+		"yidong":    "移动",
+		"MOBILE":    "移动",
+		"广电网":       "广电",
+		"中国长城宽带":    "长城宽带",
+		"chinanet":  "chinanet",
+		"liantong ": "联通",
+	} {
+		if got := LookupOperator(in); got != want {
+			t.Errorf("LookupOperator(%q) = %q, want %q", in, got, want)
+		}
+	}
+	for _, tt := range []struct {
+		a, b string
+		want bool
+	}{
+		{"联通", "中国联通", true},
+		{"广电网", "广电", true},
+		{"电信", "联通", false},
+		{"", "", false},
+		{"长城宽带", "长城宽带", true},
+	} {
+		if got := SameOperator(tt.a, tt.b); got != tt.want {
+			t.Errorf("SameOperator(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
+		}
+	}
+}
+
+func TestSameCity(t *testing.T) {
+	for _, tt := range []struct {
+		a, b string
+		want bool
+	}{
+		{"济南", "济南", true},
+		{"济南", "济南市", true},
+		{"延边朝鲜族自治州", "延边", true},
+		{"济南", "青岛", false},
+		{"", "济南", false},
+		{"", "", false},
+	} {
+		if got := SameCity(tt.a, tt.b); got != tt.want {
+			t.Errorf("SameCity(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
+		}
+	}
+}
+
 func TestProvincesOrder(t *testing.T) {
 	nodes := []Node{{Province: "广东"}, {Province: "北京"}, {Province: "江苏"}, {Province: "北京"}, {Province: ""}}
 	if got, want := Provinces(nodes), []string{"北京", "江苏", "广东"}; !slices.Equal(got, want) {

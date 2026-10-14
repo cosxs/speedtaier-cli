@@ -136,6 +136,23 @@ func TestErrorLog(t *testing.T) {
 	}
 }
 
+func TestStages(t *testing.T) {
+	for _, tt := range []struct {
+		opts Options
+		want []Stage
+	}{
+		{Options{}, []Stage{{PhaseDownload, 8}, {PhaseUpload, 8}}},
+		{Options{SingleThread: true, Threads: 4}, []Stage{{PhaseDownload, 1}, {PhaseDownload, 4}, {PhaseUpload, 1}, {PhaseUpload, 4}}},
+		{Options{SingleThread: true, Threads: 1}, []Stage{{PhaseDownload, 1}, {PhaseUpload, 1}}},
+		{Options{SingleThread: true, SkipDownload: true}, []Stage{{PhaseUpload, 1}, {PhaseUpload, 8}}},
+		{Options{SkipDownload: true, SkipUpload: true}, nil},
+	} {
+		if got := tt.opts.Stages(); !slices.Equal(got, tt.want) {
+			t.Errorf("Stages(%+v) = %v, want %v", tt.opts, got, tt.want)
+		}
+	}
+}
+
 func TestBudget(t *testing.T) {
 	tests := []struct {
 		opts Options
@@ -145,6 +162,9 @@ func TestBudget(t *testing.T) {
 		{Options{SkipUpload: true}, 31500 * time.Millisecond},
 		{Options{Seconds: 5, SkipDownload: true}, 28 * time.Second},
 		{Options{SkipDownload: true, SkipUpload: true}, 20 * time.Second},
+		// 加测单线程时每个方向多一个阶段；Threads 为 1 时已是单线程，不重复。
+		{Options{SingleThread: true}, 69 * time.Second},
+		{Options{SingleThread: true, Threads: 1}, 44500 * time.Millisecond},
 	}
 	for _, tt := range tests {
 		if got := tt.opts.Budget(); got != tt.want {

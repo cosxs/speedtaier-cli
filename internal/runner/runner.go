@@ -16,12 +16,13 @@ import (
 
 // Reporter 接收运行过程中的事件以驱动界面。所有方法都在调用 Run 的 goroutine 中同步调用。
 type Reporter interface {
-	Info(msg string)               // 仅供展示的说明，不进入结果
-	Warn(w Warning)                // 已记入 Result.Warnings 的警告
-	Step(msg string) (done func()) // 耗时步骤开始，返回结束回调
-	Survey(res *Result)            // 节点探测完成，res.Candidates 已填充
-	Testing(node NodeRef, family string)
-	Progress(u taier.ProgressUpdate)
+	Client(c Client)                                           // 本机出口与归属地
+	Warn(w Warning)                                            // 已记入 Result.Warnings 的警告
+	Step(msg string) (done func())                             // 耗时步骤开始，返回结束回调
+	Survey(res *Result)                                        // 节点探测完成，res.Candidates 已填充
+	Testing(node NodeRef, family string, stages []taier.Stage) // 开始测一个节点，stages 为将依次执行的传输阶段
+	Progress(u taier.ProgressUpdate)                           // 当前节点的测速进度
+	Tested(t Test)                                             // 一个分组测试完成，成功或所有节点都失败
 }
 
 // Discard 丢弃所有事件，用于 JSON 输出等无界面场景。
@@ -29,12 +30,13 @@ var Discard Reporter = discard{}
 
 type discard struct{}
 
-func (discard) Info(string)                   {}
-func (discard) Warn(Warning)                  {}
-func (discard) Step(string) func()            { return func() {} }
-func (discard) Survey(*Result)                {}
-func (discard) Testing(NodeRef, string)       {}
-func (discard) Progress(taier.ProgressUpdate) {}
+func (discard) Client(Client)                          {}
+func (discard) Warn(Warning)                           {}
+func (discard) Step(string) func()                     { return func() {} }
+func (discard) Survey(*Result)                         {}
+func (discard) Testing(NodeRef, string, []taier.Stage) {}
+func (discard) Progress(taier.ProgressUpdate)          {}
+func (discard) Tested(Test)                            {}
 
 // Run 执行一次完整运行。返回的 Result 总可以序列化，ExitCode 给出建议的进程退出码。
 func Run(ctx context.Context, cfg Config, rep Reporter) *Result {
@@ -43,6 +45,9 @@ func Run(ctx context.Context, cfg Config, rep Reporter) *Result {
 	}
 	if cfg.Interface == "" {
 		cfg.Interface = InterfaceAuto
+	}
+	if cfg.Operator == "" {
+		cfg.Operator = OperatorAuto
 	}
 	cfg.Test = cfg.Test.WithDefaults()
 	r := &run{ctx: ctx, cfg: cfg, rep: rep, src: cfg.Sources.withDefaults()}
@@ -68,15 +73,15 @@ func (r *run) newResult() *Result {
 			Province:       r.cfg.Province,
 			Family:         string(r.cfg.Family),
 			Interface:      r.cfg.Interface,
+			Operator:       r.cfg.Operator,
 			Threads:        o.Threads,
+			SingleThread:   o.SingleThread && o.Threads > 1,
 			MaxSeconds:     o.Seconds,
-			Bandwidth:      o.Bandwidth,
 			LatencyCount:   o.LatencyCount,
 			TimeoutSeconds: o.Timeout.Seconds(),
 			Download:       !o.SkipDownload,
 			Upload:         !o.SkipUpload,
 			SurveyOnly:     r.cfg.SurveyOnly,
-			Interactive:    r.cfg.ChooseProvince != nil,
 		},
 		Candidates: []Candidate{},
 		Tests:      []Test{},
@@ -91,7 +96,7 @@ func (r *run) warn(code, level, format string, args ...any) {
 }
 
 func (r *run) execute() error {
-	// 节点库与归属地并发获取；归属地只用于默认省份与出口信息，失败不影响测速。
+	// 节点库与归属地并发获取；归属地用于确定省份、运营商与本市，失败时须用 --province 指定省份。
 	geoCh := make(chan *taier.Geo, 1)
 	go func() {
 		g, err := r.src.Geo(r.ctx)
@@ -107,9 +112,7 @@ func (r *run) execute() error {
 	done()
 	if geo != nil {
 		r.res.Client = &Client{IP: geo.IP, Country: geo.Country, Province: geo.Province, City: geo.City, Operator: geo.Operator}
-		r.rep.Info(fmt.Sprintf("本机出口 %s · %s", geo.IP,
-			strings.Join(slices.DeleteFunc([]string{geo.Country, geo.Province, geo.City, geo.Operator},
-				func(s string) bool { return s == "" }), " ")))
+		r.rep.Client(*r.res.Client)
 	}
 	if err != nil {
 		return fmt.Errorf("获取官方节点库失败: %w", err)
@@ -121,12 +124,27 @@ func (r *run) execute() error {
 	}
 	r.res.Province = province
 	nodes := taier.InProvince(all, province)
+	// 测速只探测选定运营商的节点，list 命令列出全省节点。
+	operator, city := "", ""
+	if !r.cfg.SurveyOnly {
+		if operator, err = r.resolveOperator(province, nodes, geo); err != nil {
+			return err
+		}
+		r.res.Operator = operator
+		if operator != "" {
+			nodes = slices.DeleteFunc(nodes, func(n taier.Node) bool { return !taier.SameOperator(n.Operator, operator) })
+		}
+		if geo != nil && taier.NormalizeProvince(geo.Province) == province {
+			city = geo.City
+		}
+	}
 	dialer, err := r.selectDialer(firstIPv4(nodes))
 	if err != nil {
 		return err
 	}
 
-	done = r.rep.Step(fmt.Sprintf("探测 %s %d 个节点的 IPv4/IPv6 连通性", province, len(nodes)))
+	done = r.rep.Step(fmt.Sprintf("探测 %s %d 个节点的 IPv4/IPv6 连通性",
+		strings.TrimSpace(province+" "+operator), len(nodes)))
 	v6err := r.src.IPv6(r.ctx, nodes)
 	localV6 := taier.HasIPv6Route(dialer)
 	probe := []taier.Family{taier.IPv4}
@@ -154,10 +172,19 @@ func (r *run) execute() error {
 	}
 	opts := r.cfg.Test
 	opts.Dialer, opts.OnProgress = dialer, r.rep.Progress
-	return r.runTests(taier.PlanTests(cands, families...), opts)
+	return r.runTests(r.plan(cands, operator, city, families), opts)
 }
 
-// resolveProvince 依次使用指定省份、交互选择(默认归属地)、归属地确定省份。
+// plan 生成测速分组：--operator all 时每个运营商一组；否则只测一组(选定运营商，或运营商未知时不区分运营商)。
+// 组内本市节点优先，本市没有可达节点时测本省其他城市时延最低的节点。
+func (r *run) plan(cands []taier.Candidate, operator, city string, families []taier.Family) []taier.TestGroup {
+	if operator != "" || r.cfg.Operator == OperatorAll {
+		return taier.PlanTests(cands, city, families...)
+	}
+	return taier.PlanFastest(cands, city, families...)
+}
+
+// resolveProvince 依次使用指定省份、归属地省份。
 func (r *run) resolveProvince(provinces []string, geo *taier.Geo) (string, error) {
 	if r.cfg.Province != "" {
 		if p, ok := taier.LookupProvince(r.cfg.Province); ok && slices.Contains(provinces, p) {
@@ -170,20 +197,38 @@ func (r *run) resolveProvince(provinces []string, geo *taier.Geo) (string, error
 		return "", fmt.Errorf("没有省份 %q，可选: %s", r.cfg.Province, strings.Join(valid, " "))
 	}
 
-	home := ""
 	if geo != nil {
 		if p := taier.NormalizeProvince(geo.Province); slices.Contains(provinces, p) {
-			home = p
+			return p, nil
 		}
 	}
-	if r.cfg.ChooseProvince != nil {
-		return r.cfg.ChooseProvince(provinces, home)
+	return "", errors.New("无法按归属地确定省份(海外网络?)，请用 --province 指定，例如 --province jiangsu")
+}
+
+// resolveOperator 确定测速的运营商，空串表示不限运营商。auto 模式按归属地只测本机运营商：
+// 跨运营商测速受网间互联带宽限制，反映不了本机线路；无法确定本机运营商时测时延最低的节点。
+func (r *run) resolveOperator(province string, nodes []taier.Node, geo *taier.Geo) (string, error) {
+	switch mode := r.cfg.Operator; mode {
+	case OperatorAll:
+		return "", nil
+	case OperatorAuto:
+		if geo == nil || geo.Operator == "" {
+			r.warn(CodeOperatorUnknown, LevelInfo, "无法按归属地确定本机运营商，测试时延最低的节点(可用 --operator 指定)")
+			return "", nil
+		}
+		op := taier.LookupOperator(geo.Operator)
+		if !hasOperator(nodes, op) {
+			r.warn(CodeOperatorUnknown, LevelInfo, "%s 没有本机运营商 %s 的节点，测试时延最低的节点(可用 --operator 指定)", province, op)
+			return "", nil
+		}
+		return op, nil
+	default:
+		op := taier.LookupOperator(mode)
+		if !hasOperator(nodes, op) {
+			return "", fmt.Errorf("%s 没有运营商 %q 的节点，可选: %s all", province, mode, strings.Join(operators(nodes), " "))
+		}
+		return op, nil
 	}
-	if home == "" {
-		return "", errors.New("无法按归属地确定省份(海外网络?)，请用 --province 指定，例如 --province jiangsu")
-	}
-	r.warn(CodeProvinceFromGeo, LevelInfo, "未指定省份，按归属地使用 %s(可用 --province 指定)", home)
-	return home, nil
 }
 
 // selectDialer 按 Interface 决定测速流量的出口。auto 模式下，若到节点的路由进入透明代理(TUN)，
@@ -243,8 +288,11 @@ func (r *run) runTests(groups []taier.TestGroup, opts taier.Options) error {
 		}
 		t := Test{Operator: g.Operator, Family: familyName(g.Family), Status: TestFailed, Error: "没有可达节点"}
 		for i, node := range g.Nodes {
+			if g.Operator == "" { // 不区分运营商的分组，记录实际测试节点的运营商
+				t.Operator = node.Operator
+			}
 			ref := nodeRef(node, g.Family)
-			r.rep.Testing(ref, t.Family)
+			r.rep.Testing(ref, t.Family, opts.Stages())
 			res := taier.RunTest(r.ctx, node, g.Family, opts)
 			r.res.DataUsageBytes += res.Bytes()
 			if err := r.ctx.Err(); err != nil {
@@ -253,6 +301,7 @@ func (r *run) runTests(groups []taier.TestGroup, opts taier.Options) error {
 			if res.OK {
 				t.Status, t.Error, t.Node = TestOK, "", &ref
 				t.IdleLatency, t.Download, t.Upload = latencyOf(res.Idle), transferOf(res.Download), transferOf(res.Upload)
+				t.DownloadSingle, t.UploadSingle = transferOf(res.DownloadSingle), transferOf(res.UploadSingle)
 				break
 			}
 			t.Attempts = append(t.Attempts, Attempt{Node: ref, Error: res.Error})
@@ -262,6 +311,7 @@ func (r *run) runTests(groups []taier.TestGroup, opts taier.Options) error {
 			}
 		}
 		r.res.Tests = append(r.res.Tests, t)
+		r.rep.Tested(t)
 	}
 	return nil
 }
@@ -269,7 +319,7 @@ func (r *run) runTests(groups []taier.TestGroup, opts taier.Options) error {
 func (r *run) finish(err error) *Result {
 	res := r.res
 	switch {
-	case r.ctx.Err() != nil || errors.Is(err, ErrInterrupted):
+	case r.ctx.Err() != nil:
 		r.warn(CodeInterrupted, LevelWarn, "已中断")
 		res.ExitCode = ExitInterrupted
 	case err != nil:
@@ -309,6 +359,22 @@ func candidatesOf(cands []taier.Candidate) []Candidate {
 			IPv6: reachOf(n, taier.IPv6, c.V6),
 		}
 	}
+	return out
+}
+
+func hasOperator(nodes []taier.Node, op string) bool {
+	return slices.ContainsFunc(nodes, func(n taier.Node) bool { return taier.SameOperator(n.Operator, op) })
+}
+
+// operators 返回节点中出现的运营商，按 taier.CompareOperator 排序。
+func operators(nodes []taier.Node) []string {
+	var out []string
+	for _, n := range nodes {
+		if n.Operator != "" && !slices.Contains(out, n.Operator) {
+			out = append(out, n.Operator)
+		}
+	}
+	slices.SortStableFunc(out, taier.CompareOperator)
 	return out
 }
 

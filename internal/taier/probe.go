@@ -130,17 +130,17 @@ func probeAddr(ctx context.Context, d Dialer, addr string) Reach {
 	return Reach{State: ReachOK, RTT: best}
 }
 
-// TestGroup 是同一运营商、同一协议族下按建连时延升序排列的可达节点。
+// TestGroup 是同一协议族下按测试顺序排列的可达节点：city 的节点在前(本市优先)，前后两部分各按探测时延升序。
 // 测速时依次尝试，首个成功的节点即为该组结果；Nodes 为空表示该组没有可达节点。
 type TestGroup struct {
-	Operator string
+	Operator string // PlanFastest 的分组不区分运营商，为空
 	Family   Family
 	Nodes    []Node
 }
 
-// PlanTests 按运营商分组，为每个协议族挑出可达节点并按时延排序。
+// PlanTests 按运营商分组，为每个协议族挑出可达节点并排好测试顺序。
 // 运营商在某协议族下没有任何地址时不生成对应分组。
-func PlanTests(cands []Candidate, families ...Family) []TestGroup {
+func PlanTests(cands []Candidate, city string, families ...Family) []TestGroup {
 	var ops []string
 	for _, c := range cands {
 		if !slices.Contains(ops, c.Node.Operator) {
@@ -151,31 +151,56 @@ func PlanTests(cands []Candidate, families ...Family) []TestGroup {
 
 	var groups []TestGroup
 	for _, op := range ops {
+		same := slices.DeleteFunc(slices.Clone(cands), func(c Candidate) bool { return c.Node.Operator != op })
 		for _, f := range families {
-			var reachable []Candidate
-			hasAddr := false
-			for _, c := range cands {
-				if c.Node.Operator != op {
-					continue
-				}
-				r := c.ReachOf(f)
-				hasAddr = hasAddr || r.State != ReachNoAddr
-				if r.State == ReachOK {
-					reachable = append(reachable, c)
-				}
+			if g, ok := planGroup(same, city, f); ok {
+				g.Operator = op
+				groups = append(groups, g)
 			}
-			if !hasAddr {
-				continue
-			}
-			slices.SortStableFunc(reachable, func(a, b Candidate) int {
-				return cmp.Compare(a.ReachOf(f).RTT, b.ReachOf(f).RTT)
-			})
-			g := TestGroup{Operator: op, Family: f}
-			for _, c := range reachable {
-				g.Nodes = append(g.Nodes, c.Node)
-			}
+		}
+	}
+	return groups
+}
+
+// PlanFastest 不区分运营商，每个协议族只生成一个分组，测试顺序同 PlanTests。
+func PlanFastest(cands []Candidate, city string, families ...Family) []TestGroup {
+	var groups []TestGroup
+	for _, f := range families {
+		if g, ok := planGroup(cands, city, f); ok {
 			groups = append(groups, g)
 		}
 	}
 	return groups
+}
+
+// planGroup 排列 cands 在协议族 f 下的可达节点；cands 都没有该协议族的地址时 ok 为 false。
+func planGroup(cands []Candidate, city string, f Family) (g TestGroup, ok bool) {
+	var reachable []Candidate
+	for _, c := range cands {
+		r := c.ReachOf(f)
+		ok = ok || r.State != ReachNoAddr
+		if r.State == ReachOK {
+			reachable = append(reachable, c)
+		}
+	}
+	remote := func(c Candidate) bool { return !SameCity(c.Node.City, city) }
+	slices.SortStableFunc(reachable, func(a, b Candidate) int {
+		return cmp.Or(compareBool(remote(a), remote(b)), cmp.Compare(a.ReachOf(f).RTT, b.ReachOf(f).RTT))
+	})
+	g = TestGroup{Family: f}
+	for _, c := range reachable {
+		g.Nodes = append(g.Nodes, c.Node)
+	}
+	return g, ok
+}
+
+// compareBool 把 false 排在 true 前面。
+func compareBool(a, b bool) int {
+	switch {
+	case a == b:
+		return 0
+	case a:
+		return 1
+	}
+	return -1
 }

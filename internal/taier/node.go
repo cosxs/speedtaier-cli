@@ -168,6 +168,12 @@ func provinceRank(name string) int {
 	return len(provinceTable)
 }
 
+// SameCity 判断两个城市名是否指同一城市，兼容归属地的全称，如 "济南市"、"延边朝鲜族自治州" 分别与 "济南"、"延边" 相同。
+func SameCity(a, b string) bool {
+	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+	return a != "" && b != "" && (strings.HasPrefix(a, b) || strings.HasPrefix(b, a))
+}
+
 // InProvince 返回属于指定省份的节点，保持节点库原有顺序(省会排在最前)。
 func InProvince(nodes []Node, province string) []Node {
 	province = NormalizeProvince(province)
@@ -222,6 +228,39 @@ func operatorRank(op string) int {
 		}
 	}
 	return len(operatorOrder)
+}
+
+// operatorAliases 是常见运营商的拼音与英文名。
+var operatorAliases = map[string]string{
+	"dianxin": "电信", "telecom": "电信",
+	"liantong": "联通", "unicom": "联通",
+	"yidong": "移动", "mobile": "移动",
+	"guangdian": "广电",
+}
+
+// LookupOperator 把运营商的中文名、拼音或英文名(不区分大小写)统一为 operatorOrder 中的写法，
+// 如 "unicom"、"中国联通" 都返回 "联通"；未知运营商只去掉"中国"前缀。
+func LookupOperator(s string) string {
+	if o, ok := operatorAliases[strings.ToLower(strings.TrimSpace(s))]; ok {
+		return o
+	}
+	return canonicalOperator(s)
+}
+
+// SameOperator 判断两个运营商名称是否指同一运营商，如 "中国联通" 与 "联通"、"广电网" 与 "广电"。
+func SameOperator(a, b string) bool {
+	a, b = canonicalOperator(a), canonicalOperator(b)
+	return a != "" && a == b
+}
+
+func canonicalOperator(op string) string {
+	op = strings.TrimPrefix(strings.TrimSpace(op), "中国")
+	for _, o := range operatorOrder {
+		if strings.HasPrefix(op, o) {
+			return o
+		}
+	}
+	return op
 }
 
 // attachIPv6 按 hostid 把匹配接口返回的 IPv6 地址合并进 nodes，返回合并数量。
