@@ -57,6 +57,7 @@ type config struct {
 	noDownload    bool
 	noUpload      bool
 	noSingle      bool
+	selectNode    bool
 	noProgress    bool
 	noUpdateCheck bool
 }
@@ -116,6 +117,7 @@ func (a *app) newRootCmd() *cobra.Command {
 	f.IntVar(&a.cfg.seconds, "seconds", 10, "每阶段最长计量秒数(不含预热)；吞吐稳定后提前结束")
 	f.IntVar(&a.cfg.timeout, "timeout", 0, "单节点总超时秒，0 表示按测速时长自动计算")
 	f.IntVar(&a.cfg.latencyCount, "latency-count", 20, "空载时延采样次数(抖动按这些样本计算)")
+	f.BoolVar(&a.cfg.selectNode, "select", false, "交互选择省份与节点，只测所选节点(忽略 --operator)")
 	f.BoolVar(&a.cfg.noSingle, "no-single", false, "不测单线程，只测多线程(--threads 条连接)")
 	f.BoolVar(&a.cfg.noDownload, "no-download", false, "跳过下载测速")
 	f.BoolVar(&a.cfg.noUpload, "no-upload", false, "跳过上传测速")
@@ -157,6 +159,12 @@ func (a *app) run(ctx context.Context, surveyOnly bool) error {
 		Operator:   a.cfg.operator,
 		Test:       opts,
 		SurveyOnly: surveyOnly,
+	}
+	if a.cfg.selectNode {
+		if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) || !isTerminal(os.Stderr) {
+			return errNoTerminal
+		}
+		cfg.Chooser = promptChooser{}
 	}
 
 	current := readBuildInfo().Version

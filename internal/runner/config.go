@@ -10,6 +10,19 @@ import (
 	"github.com/cosxs/speedtaier-cli/internal/taier"
 )
 
+// ErrInterrupted 表示用户中断(如在交互选择中按下 Ctrl-C)。
+var ErrInterrupted = errors.New("已中断")
+
+// Chooser 让用户交互选择省份与节点；Config.Chooser 为 nil 表示自动选择。
+// 两个方法按顺序各调用一次，都在调用 Run 的 goroutine 中同步调用；用户中断时返回 ErrInterrupted。
+type Chooser interface {
+	// Province 选择省份。provinces 为可选省份，home 为按归属地得到的省份(可能为空)，用作默认选项。
+	Province(provinces []string, home string) (name string, err error)
+	// Node 在已探测连通性的节点中选择一个，返回它在 nodes 中的下标。
+	// nodes 按城市、运营商排序；def 是自动模式会选的节点的下标(没有可选节点时为 -1)，用作默认选项。
+	Node(province string, nodes []Candidate, def int) (index int, err error)
+}
+
 // FamilyMode 决定测速使用的协议族。
 type FamilyMode string
 
@@ -68,6 +81,9 @@ type Config struct {
 	Operator   string     // auto、all 或运营商名(中文、拼音或英文，如 联通、unicom)；空等同 auto
 	Test       taier.Options
 	SurveyOnly bool // 只探测节点连通性，不测速(list 命令)
+
+	// Chooser 非 nil 时交互选择省份与节点，只测所选节点，忽略 Operator；Province 非空时跳过省份选择。
+	Chooser Chooser
 
 	// Sources 提供外部数据，零值字段使用官方接口；测试中可替换为本地数据。
 	Sources Sources

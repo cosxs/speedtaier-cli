@@ -109,7 +109,7 @@ func (r *run) execute() error {
 	nodes := taier.InProvince(all, province)
 	// 测速只探测选定运营商的节点，list 命令列出全省节点。
 	operator, city := "", ""
-	if !r.cfg.SurveyOnly {
+	if !r.cfg.SurveyOnly && r.cfg.Chooser == nil {
 		if operator, err = r.resolveOperator(province, nodes, geo); err != nil {
 			return err
 		}
@@ -117,16 +117,16 @@ func (r *run) execute() error {
 		if operator != "" {
 			nodes = slices.DeleteFunc(nodes, func(n taier.Node) bool { return !taier.SameOperator(n.Operator, operator) })
 		}
-		if geo != nil && taier.NormalizeProvince(geo.Province) == province {
-			city = geo.City
-		}
+	}
+	if geo != nil && taier.NormalizeProvince(geo.Province) == province {
+		city = geo.City
 	}
 	dialer, err := r.selectDialer(firstIPv4(nodes))
 	if err != nil {
 		return err
 	}
 
-	done = r.rep.Step(fmt.Sprintf("探测 %s %d 个节点的 IPv4/IPv6 连通性",
+	done = r.rep.Step(fmt.Sprintf("探测 %s %d 个节点的连通性",
 		strings.TrimSpace(province+" "+operator), len(nodes)))
 	v6err := r.src.IPv6(r.ctx, nodes)
 	localV6 := taier.HasIPv6Route(dialer)
@@ -143,7 +143,7 @@ func (r *run) execute() error {
 		r.warn(CodeIPv6LookupFailed, LevelWarn, "部分运营商的 IPv6 节点获取失败: %v", v6err)
 	}
 	r.res.Network.IPv6 = localV6
-	r.res.Candidates = candidatesOf(cands)
+	r.res.Candidates = candidatesOf(sortCandidates(cands))
 	r.rep.Survey(r.res)
 	if r.cfg.SurveyOnly {
 		return nil
@@ -155,7 +155,61 @@ func (r *run) execute() error {
 	}
 	opts := r.cfg.Test
 	opts.Dialer, opts.OnProgress = dialer, r.rep.Progress
+	if r.cfg.Chooser != nil {
+		chosen, err := r.chooseNode(province, cands, geo, city)
+		if err != nil {
+			return err
+		}
+		groups := taier.PlanTests([]taier.Candidate{chosen}, city, families...)
+		if len(groups) == 0 { // 所选节点没有当前协议族的地址
+			return fmt.Errorf("所选节点 %s 没有可测速的地址(协议: %s)", chosen.Node.Name, r.cfg.Family)
+		}
+		return r.runTests(groups, opts)
+	}
 	return r.runTests(r.plan(cands, operator, city, families), opts)
+}
+
+// chooseNode 让 Chooser 在已探测的节点中选一个。默认选项是自动模式会选的节点：
+// 本机运营商(查不到或该省没有时不限运营商)中，本市优先、时延最低的可达节点。
+func (r *run) chooseNode(province string, cands []taier.Candidate, geo *taier.Geo, city string) (taier.Candidate, error) {
+	sorted := sortCandidates(cands)
+	operator := ""
+	if geo != nil && geo.Operator != "" {
+		if op := taier.LookupOperator(geo.Operator); slices.ContainsFunc(sorted, func(c taier.Candidate) bool { return taier.SameOperator(c.Node.Operator, op) }) {
+			operator = op
+		}
+	}
+	i, err := r.cfg.Chooser.Node(province, candidatesOf(sorted), defaultChoice(sorted, operator, city))
+	if err != nil {
+		return taier.Candidate{}, err
+	}
+	if i < 0 || i >= len(sorted) {
+		return taier.Candidate{}, fmt.Errorf("选择的节点序号 %d 超出范围", i)
+	}
+	return sorted[i], nil
+}
+
+// defaultChoice 返回自动模式会选的节点在 sorted 中的下标：operator 非空时只看该运营商，
+// 本市(city)的可达节点优先，其余按时延(IPv4 可达用 IPv4，否则用 IPv6)；没有可达节点时为 -1。
+func defaultChoice(sorted []taier.Candidate, operator, city string) int {
+	best, bestRemote, bestRTT := -1, false, time.Duration(0)
+	for i, c := range sorted {
+		if operator != "" && !taier.SameOperator(c.Node.Operator, operator) {
+			continue
+		}
+		reach := c.V4
+		if reach.State != taier.ReachOK {
+			reach = c.V6
+		}
+		if reach.State != taier.ReachOK {
+			continue
+		}
+		remote := !taier.SameCity(c.Node.City, city)
+		if best < 0 || (!remote && bestRemote) || (remote == bestRemote && reach.RTT < bestRTT) {
+			best, bestRemote, bestRTT = i, remote, reach.RTT
+		}
+	}
+	return best
 }
 
 // plan 生成测速分组：--operator all 时每个运营商一组；否则只测一组(选定运营商，或运营商未知时不区分运营商)。
@@ -167,7 +221,7 @@ func (r *run) plan(cands []taier.Candidate, operator, city string, families []ta
 	return taier.PlanFastest(cands, city, families...)
 }
 
-// resolveProvince 依次使用指定省份、归属地省份。
+// resolveProvince 依次使用指定省份；交互选择时由 Chooser 选择(归属地省份为默认)；否则使用归属地省份。
 func (r *run) resolveProvince(provinces []string, geo *taier.Geo) (string, error) {
 	if r.cfg.Province != "" {
 		if p, ok := taier.LookupProvince(r.cfg.Province); ok && slices.Contains(provinces, p) {
@@ -180,12 +234,19 @@ func (r *run) resolveProvince(provinces []string, geo *taier.Geo) (string, error
 		return "", fmt.Errorf("没有省份 %q，可选: %s", r.cfg.Province, strings.Join(valid, " "))
 	}
 
+	home := ""
 	if geo != nil {
 		if p := taier.NormalizeProvince(geo.Province); slices.Contains(provinces, p) {
-			return p, nil
+			home = p
 		}
 	}
-	return "", errors.New("无法按归属地确定省份(海外网络?)，请用 --province 指定，例如 --province jiangsu")
+	if r.cfg.Chooser != nil {
+		return r.cfg.Chooser.Province(provinces, home)
+	}
+	if home == "" {
+		return "", errors.New("无法按归属地确定省份(海外网络?)，请用 --province 指定，例如 --province jiangsu")
+	}
+	return home, nil
 }
 
 // resolveOperator 确定测速的运营商，空串表示不限运营商。auto 模式按归属地只测本机运营商：
@@ -302,7 +363,7 @@ func (r *run) runTests(groups []taier.TestGroup, opts taier.Options) error {
 func (r *run) finish(err error) *Result {
 	res := r.res
 	switch {
-	case r.ctx.Err() != nil:
+	case r.ctx.Err() != nil || errors.Is(err, ErrInterrupted):
 		r.warn(CodeInterrupted, LevelWarn, "已中断")
 		res.ExitCode = ExitInterrupted
 	case err != nil:
@@ -318,8 +379,8 @@ func (r *run) finish(err error) *Result {
 	return res
 }
 
-// candidatesOf 按城市分组(保持节点库中的城市顺序，省会在前)，同城按运营商排序。
-func candidatesOf(cands []taier.Candidate) []Candidate {
+// sortCandidates 按城市分组(保持节点库中的城市顺序，省会在前)，同城按运营商排序。
+func sortCandidates(cands []taier.Candidate) []taier.Candidate {
 	cityIndex := make(map[string]int)
 	for _, c := range cands {
 		if _, ok := cityIndex[c.Node.City]; !ok {
@@ -333,6 +394,11 @@ func candidatesOf(cands []taier.Candidate) []Candidate {
 			taier.CompareOperator(a.Node.Operator, b.Node.Operator),
 		)
 	})
+	return sorted
+}
+
+// candidatesOf 把已排好序的候选节点转换为结果中的形式。
+func candidatesOf(sorted []taier.Candidate) []Candidate {
 	out := make([]Candidate, len(sorted))
 	for i, c := range sorted {
 		n := c.Node
