@@ -3,6 +3,7 @@ package taier
 import (
 	"encoding/hex"
 	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -51,7 +52,8 @@ func FuzzDecryptServerList(f *testing.F) {
 		if err != nil {
 			return
 		}
-		if raw, _ := hex.DecodeString(string(data)); len(plain) >= len(raw) {
+		// 与 decryptServerList 一致：解码前去掉首尾空白。
+		if raw, _ := hex.DecodeString(strings.TrimSpace(string(data))); len(plain) >= len(raw) {
 			t.Fatalf("plaintext (%d bytes) should be shorter than ciphertext (%d bytes)", len(plain), len(raw))
 		}
 	})
