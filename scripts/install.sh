@@ -10,7 +10,7 @@
 #   INSTALL_DIR   安装目录；默认 root 为 /usr/local/bin 或 /usr/bin，普通用户为 ~/.local/bin
 #   GITHUB_PROXY  GitHub 下载加速前缀，最终地址为 前缀 + 原始地址，如 https://proxy.example.com/
 #   RELEASE_BASE  自定义发布包下载地址(目录)，设置后忽略 VERSION 与 GITHUB_PROXY
-#   ARCH          跳过自动检测，直接指定架构：amd64、arm64、armv7、386、mips、mipsle
+#   ARCH          跳过自动检测，直接指定架构：amd64、arm64、armv7、386
 set -eu
 
 REPO="cosxs/speedtaier-cli"
@@ -50,34 +50,6 @@ detect_os() {
 	esac
 }
 
-# mips_endian：uname -m 不区分 MIPS 大小端。优先读 OpenWrt 的架构信息，否则读 /bin/sh 的 ELF 头(第 6 字节：1 小端、2 大端)。
-mips_endian() {
-	if [ -r /etc/openwrt_release ]; then
-		# shellcheck source=/dev/null
-		case "$(. /etc/openwrt_release && echo "${DISTRIB_ARCH:-}")" in
-		mipsel* | mips64el*)
-			echo mipsle
-			return
-			;;
-		mips*)
-			echo mips
-			return
-			;;
-		esac
-	fi
-	byte=""
-	if has od; then
-		byte="$(od -An -tx1 -j5 -N1 /bin/sh 2>/dev/null | tr -d ' \n')"
-	elif has hexdump; then
-		byte="$(hexdump -s 5 -n 1 -e '1/1 "%02x"' /bin/sh 2>/dev/null)"
-	fi
-	case "$byte" in
-	01) echo mipsle ;;
-	02) echo mips ;;
-	*) die "无法判断 MIPS 字节序，请用 ARCH=mips 或 ARCH=mipsle 指定" ;;
-	esac
-}
-
 detect_arch() {
 	if [ -n "${ARCH:-}" ]; then
 		echo "$ARCH"
@@ -89,8 +61,7 @@ detect_arch() {
 	aarch64 | arm64) echo arm64 ;;
 	armv7* | armv8l) echo armv7 ;;
 	i386 | i486 | i586 | i686) echo 386 ;;
-	mips | mipsel | mips64 | mips64el) mips_endian ;; # 64 位 MIPS 内核可运行 32 位程序
-	*) die "不支持的架构: $machine(可用 ARCH 环境变量指定)" ;;
+	*) die "不支持的架构: $machine" ;;
 	esac
 }
 

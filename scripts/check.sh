@@ -56,7 +56,7 @@ if ! $quick; then
   go tool govulncheck ./...
 
   step "交叉编译"
-  for platform in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 linux/mipsle windows/amd64; do
+  for platform in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64; do
     GOOS="${platform%/*}" GOARCH="${platform#*/}" CGO_ENABLED=0 go build -o "$tmp/cross" ./cmd/speedtaier && echo "  $platform"
   done
 fi

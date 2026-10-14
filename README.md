@@ -12,7 +12,7 @@
 - **识别透明代理**：检测到 Surge、Clash、sing-box 等 TUN 模式时，测速流量自动改由物理网卡直接发出，避免结果失真。
 - **IPv4 / IPv6 双栈**：本机有 IPv6 路由时自动加测 IPv6。
 - **适合脚本**：`--json` 输出稳定结构的单行 JSON，带警告编码与退出码。
-- **单一静态二进制**：支持 macOS、Linux、Windows，以及 OpenWrt/iStoreOS 等[软路由](#软路由)(x86、ARM、MIPS)，提供一键安装脚本。
+- **单一静态二进制**：支持 macOS、Linux、Windows，以及 OpenWrt/iStoreOS 等[软路由](#软路由)(x86、ARM)，提供一键安装脚本。
 
 ## 安装
 
@@ -37,7 +37,7 @@ wget -qO- https://raw.githubusercontent.com/cosxs/speedtaier-cli/main/scripts/in
 | `VERSION` | 安装指定版本，如 `v0.6.2`；默认最新版 |
 | `INSTALL_DIR` | 安装目录 |
 | `GITHUB_PROXY` | GitHub 下载加速前缀，最终地址为 前缀 + 原始地址 |
-| `ARCH` | 跳过自动检测，指定 `amd64`、`arm64`、`armv7`、`386`、`mips`、`mipsle` |
+| `ARCH` | 跳过自动检测，指定 `amd64`、`arm64`、`armv7`、`386` |
 
 访问 GitHub 困难时，可以给脚本地址和下载地址都加上 GitHub 加速服务的前缀：
 
@@ -149,10 +149,8 @@ speedtaier --interface none    # 按系统路由，即经过代理测速
 | x86 软路由(J4125、N100 等) | x86_64 | `linux-amd64` |
 | R2S/R4S/R5S、RK3568/RK3588、N1 等 | ARM64 | `linux-arm64` |
 | 32 位 ARM 设备 | ARMv7 | `linux-armv7` |
-| MT7621 等刷 OpenWrt 的硬路由 | MIPS 小端 | `linux-mipsle` |
-| 部分高通 ath79 等设备 | MIPS 大端 | `linux-mips` |
 
-一键安装脚本会自动选择合适的包(MIPS 的大小端从 `/etc/openwrt_release` 或系统程序的文件头判断)。程序为静态编译，不依赖系统 C 库，测速时内存占用约 30 MB。
+一键安装脚本会自动选择合适的包。程序为静态编译，不依赖系统 C 库，测速时内存占用约 30 MB。MIPS 架构的硬路由(如 MT7621)暂不支持。
 
 注意事项：
 
@@ -160,7 +158,7 @@ speedtaier --interface none    # 按系统路由，即经过代理测速
   ```bash
   wget -qO- https://raw.githubusercontent.com/cosxs/speedtaier-cli/main/scripts/install.sh | INSTALL_DIR=/tmp sh
   ```
-- **CPU 可能成为瓶颈**：性能较弱的设备(MIPS、Cortex-A53 级 ARM)可能跑不满千兆。测速时可用 `top` 观察，CPU 占满说明结果受限于路由器本身；MIPS 设备的结果只适合作参考。
+- **CPU 可能成为瓶颈**：性能较弱的设备(如 Cortex-A53 级 ARM)可能跑不满千兆。测速时可用 `top` 观察，CPU 占满说明结果受限于路由器本身。
 - **PPPoE 拨号与代理插件**：PPPoE 的 WAN 口(如 `pppoe-wan`)不会被误判为代理；OpenClash 等插件的 TUN 模式会被识别，测速连接自动绑定 WAN 口绕开代理。只代理局域网设备流量的 iptables/nftables 透明代理不影响路由器自身的测速。
 - **定时测速**：交互选择需要终端，定时任务中请指定省份，结果按行追加为 JSON。每次测速约消耗 1–2 GB 流量，请控制频率。以 OpenWrt 为例，执行 `crontab -e` 添加：
   ```
