@@ -25,15 +25,15 @@ func updateSource() update.Source {
 	return update.Source{Proxy: os.Getenv("GITHUB_PROXY")}
 }
 
-// updateCheckEnabled 决定是否检查新版本。只在交互式终端中检查：JSON 输出、重定向 stderr 的脚本与定时任务
-// 都不检查，避免联网和多余输出；也可以用 --no-update-check 或环境变量关闭。
-func updateCheckEnabled(noFlag, json bool, env string, stderrIsTerminal bool) bool {
-	return !noFlag && !json && env == "" && stderrIsTerminal
+// updateCheckEnabled 决定是否检查新版本。只在交互式终端中检查：重定向 stderr 的脚本与定时任务
+// 不检查，避免联网和多余输出；也可以用 --no-update-check 或环境变量关闭。
+func updateCheckEnabled(noFlag bool, env string, stderrIsTerminal bool) bool {
+	return !noFlag && env == "" && stderrIsTerminal
 }
 
 // startUpdateCheck 在后台检查新版本，返回的函数不阻塞：有新版本时给出版本号，否则返回空串。
 func (a *app) startUpdateCheck(current string) func() string {
-	if !updateCheckEnabled(a.cfg.noUpdateCheck, a.cfg.json, os.Getenv(noUpdateCheckEnv), isTerminal(os.Stderr)) {
+	if !updateCheckEnabled(a.cfg.noUpdateCheck, os.Getenv(noUpdateCheckEnv), isTerminal(os.Stderr)) {
 		return func() string { return "" }
 	}
 	return update.Checker{Source: updateSource(), Cache: update.DefaultCache()}.Start(current)

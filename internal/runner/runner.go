@@ -25,7 +25,7 @@ type Reporter interface {
 	Tested(t Test)                                             // 一个分组测试完成，成功或所有节点都失败
 }
 
-// Discard 丢弃所有事件，用于 JSON 输出等无界面场景。
+// Discard 丢弃所有事件，用于测试等无界面场景。
 var Discard Reporter = discard{}
 
 type discard struct{}
@@ -64,25 +64,8 @@ type run struct {
 }
 
 func (r *run) newResult() *Result {
-	o := r.cfg.Test
 	return &Result{
-		SchemaVersion: SchemaVersion,
-		Version:       r.cfg.Version,
-		StartedAt:     time.Now().Truncate(time.Millisecond),
-		Config: RunConfig{
-			Province:       r.cfg.Province,
-			Family:         string(r.cfg.Family),
-			Interface:      r.cfg.Interface,
-			Operator:       r.cfg.Operator,
-			Threads:        o.Threads,
-			SingleThread:   o.SingleThread && o.Threads > 1,
-			MaxSeconds:     o.Seconds,
-			LatencyCount:   o.LatencyCount,
-			TimeoutSeconds: o.Timeout.Seconds(),
-			Download:       !o.SkipDownload,
-			Upload:         !o.SkipUpload,
-			SurveyOnly:     r.cfg.SurveyOnly,
-		},
+		StartedAt:  time.Now().Truncate(time.Millisecond),
 		Candidates: []Candidate{},
 		Tests:      []Test{},
 		Warnings:   []Warning{},

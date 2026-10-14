@@ -1,5 +1,5 @@
 // Package runner 编排一次完整的测速：确定省份与运营商、选择出口网卡、探测节点连通性、按运营商测速，
-// 并产出可序列化为 JSON 的 Result。界面通过 Reporter 接收过程事件，不参与业务逻辑。
+// 并产出 Result。界面通过 Reporter 接收过程事件，不参与业务逻辑。
 package runner
 
 import (
@@ -67,8 +67,7 @@ type Config struct {
 	Interface  string     // auto、none 或网卡名；空等同 auto
 	Operator   string     // auto、all 或运营商名(中文、拼音或英文，如 联通、unicom)；空等同 auto
 	Test       taier.Options
-	SurveyOnly bool   // 只探测节点连通性，不测速(list 命令)
-	Version    string // 工具版本，写入结果便于追溯
+	SurveyOnly bool // 只探测节点连通性，不测速(list 命令)
 
 	// Sources 提供外部数据，零值字段使用官方接口；测试中可替换为本地数据。
 	Sources Sources

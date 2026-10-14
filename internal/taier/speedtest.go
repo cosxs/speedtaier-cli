@@ -40,7 +40,6 @@ type Options struct {
 	Seconds      int  // 每个传输阶段的最长计量秒数(不含预热)，吞吐收敛后提前结束
 	LatencyCount int
 	Timeout      time.Duration // 单节点总超时，0 表示按 Budget 自动计算
-	IMEI         string
 	SkipDownload bool
 	SkipUpload   bool
 	OnProgress   func(ProgressUpdate)
@@ -136,7 +135,6 @@ type Result struct {
 	Node     Node
 	Family   Family
 	OK       bool
-	IMEI     string
 	Idle     LatencyStats // 空载时延
 	Download Transfer     // 多线程(Options.Threads 条连接)下载
 	Upload   Transfer
@@ -196,11 +194,7 @@ func RunTest(ctx context.Context, node Node, family Family, opts Options) Result
 		return res
 	}
 
-	res.IMEI = opts.IMEI
-	if res.IMEI == "" {
-		res.IMEI = newIMEI()
-	}
-	uuid, err := doValid(ctx, opts.Dialer, addr, res.IMEI, 4*time.Second)
+	uuid, err := doValid(ctx, opts.Dialer, addr, newIMEI(), 4*time.Second)
 	if err != nil {
 		res.Error = err.Error()
 		return res

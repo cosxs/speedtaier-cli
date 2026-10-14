@@ -2,7 +2,6 @@ package runner
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/netip"
 	"slices"
@@ -80,12 +79,13 @@ func TestRunPerOperator(t *testing.T) {
 	}
 	for _, tt := range res.Tests {
 		if tt.Status != TestOK || tt.Node == nil || tt.Download == nil || tt.Upload == nil ||
-			tt.Download.Mbps <= 0 || tt.IdleLatency == nil || tt.IdleLatency.Samples != 2 {
+			tt.Download.Mbps <= 0 || tt.IdleLatency == nil || tt.IdleLatency.Samples != 2 ||
+			tt.Download.TotalMs < tt.Download.DurationMs { // 传输量与总用时含预热，计量时长不含
 			t.Errorf("test = %+v", tt)
 		}
 	}
-	if res.DataUsageBytes <= 0 || res.Config.MaxSeconds != 1 || res.Config.TimeoutSeconds <= 0 {
-		t.Errorf("usage=%d config=%+v", res.DataUsageBytes, res.Config)
+	if res.DataUsageBytes <= 0 {
+		t.Errorf("usage = %d", res.DataUsageBytes)
 	}
 }
 
@@ -175,18 +175,15 @@ func TestRunSingleThread(t *testing.T) {
 	if want := []taier.Stage{{Phase: taier.PhaseDownload, Threads: 1}, {Phase: taier.PhaseDownload, Threads: 2}}; !slices.Equal(stages, want) {
 		t.Errorf("stages = %v, want %v", stages, want)
 	}
-	if !res.Config.SingleThread || res.Config.Threads != 2 {
-		t.Errorf("config = %+v", res.Config)
-	}
 	if want := tt.Download.Bytes + tt.DownloadSingle.Bytes; res.DataUsageBytes != want {
 		t.Errorf("data usage = %d, want %d (both stages)", res.DataUsageBytes, want)
 	}
 
-	// Threads 为 1 时已是单线程，不重复测，也不标记 single_thread。
+	// Threads 为 1 时已是单线程，不重复测。
 	cfg.Test.Threads, stages = 1, nil
 	res = Run(context.Background(), cfg, rep)
-	if tt := res.Tests[0]; tt.Download == nil || tt.Download.Threads != 1 || tt.DownloadSingle != nil || res.Config.SingleThread {
-		t.Errorf("threads=1: test=%+v config=%+v", tt, res.Config)
+	if tt := res.Tests[0]; tt.Download == nil || tt.Download.Threads != 1 || tt.DownloadSingle != nil {
+		t.Errorf("threads=1: test=%+v", tt)
 	}
 }
 
@@ -292,51 +289,6 @@ func TestCandidatesOrder(t *testing.T) {
 	// 按城市首次出现的顺序分组，同城按运营商排序。
 	if want := []string{"济南电信", "济南移动", "青岛电信"}; !slices.Equal(names, want) {
 		t.Errorf("order = %v, want %v", names, want)
-	}
-}
-
-func TestResultJSON(t *testing.T) {
-	cfg := testConfig(t, spec{name: "济南电信", city: "济南", operator: "电信"})
-	cfg.Version = "test"
-	data, err := json.Marshal(Run(context.Background(), cfg, Discard))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var doc map[string]any
-	if err := json.Unmarshal(data, &doc); err != nil {
-		t.Fatal(err)
-	}
-	if cfg := doc["config"].(map[string]any); cfg["operator"] != OperatorAll {
-		t.Errorf("config.operator = %v", cfg["operator"])
-	}
-	for _, key := range []string{"schema_version", "version", "started_at", "duration_ms", "config", "client",
-		"province", "network", "candidates", "tests", "data_usage_bytes", "warnings", "degraded", "exit_code"} {
-		if _, ok := doc[key]; !ok {
-			t.Errorf("JSON missing %q: %s", key, data)
-		}
-	}
-	if doc["schema_version"] != float64(SchemaVersion) {
-		t.Errorf("schema_version = %v", doc["schema_version"])
-	}
-	// 空列表输出为 []，而不是 null，方便 jq 等工具直接遍历。
-	if w, ok := doc["warnings"].([]any); !ok || len(w) != 0 {
-		t.Errorf("warnings = %#v", doc["warnings"])
-	}
-	test := doc["tests"].([]any)[0].(map[string]any)
-	for _, key := range []string{"operator", "family", "status", "node", "idle_latency", "download", "upload"} {
-		if _, ok := test[key]; !ok {
-			t.Errorf("test JSON missing %q", key)
-		}
-	}
-	// 传输量(bytes)含预热，total_ms 是同口径的总用时，duration_ms 是不含预热的计量时长。
-	dl := test["download"].(map[string]any)
-	for _, key := range []string{"threads", "mbps", "bytes", "total_ms", "duration_ms", "stable", "loaded_latency"} {
-		if _, ok := dl[key]; !ok {
-			t.Errorf("download JSON missing %q", key)
-		}
-	}
-	if dl["total_ms"].(float64) < dl["duration_ms"].(float64) {
-		t.Errorf("total_ms %v < duration_ms %v", dl["total_ms"], dl["duration_ms"])
 	}
 }
 

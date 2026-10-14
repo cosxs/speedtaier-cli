@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -18,12 +19,16 @@ func newTestApp(t *testing.T, args ...string) *app {
 }
 
 func TestFlags(t *testing.T) {
-	a := newTestApp(t, "--family", "ipv6", "--province", "shandong", "--interface", "en0", "--operator", "all",
-		"--json")
+	a := newTestApp(t, "--family", "ipv6", "--province", "shandong", "--interface", "en0", "--operator", "all")
 	c := a.cfg
-	if c.family.mode != runner.Family6 || c.province != "shandong" || c.iface != "en0" || c.operator != runner.OperatorAll ||
-		!c.json {
+	if c.family.mode != runner.Family6 || c.province != "shandong" || c.iface != "en0" || c.operator != runner.OperatorAll {
 		t.Errorf("parsed config = %+v", c)
+	}
+	// 已移除的参数按未知参数报错。
+	for _, flag := range []string{"--json", "--imei", "--latency-count", "--non-interactive", "--bandwidth"} {
+		if err := a.newRootCmd().ParseFlags([]string{flag, "1"}); err == nil || !strings.Contains(err.Error(), "unknown flag") {
+			t.Errorf("%s: err = %v, want unknown flag", flag, err)
+		}
 	}
 	if err := a.newRootCmd().ParseFlags([]string{"--family", "x"}); err == nil {
 		t.Error("--family x: want error")
@@ -70,18 +75,17 @@ func TestTestOptionsTimeout(t *testing.T) {
 func TestUpdateCheckEnabled(t *testing.T) {
 	for _, tt := range []struct {
 		name             string
-		noFlag, json     bool
+		noFlag           bool
 		env              string
 		stderrIsTerminal bool
 		want             bool
 	}{
-		{"interactive terminal", false, false, "", true, true},
-		{"stderr redirected (cron, pipes)", false, false, "", false, false},
-		{"json output", false, true, "", true, false},
-		{"flag", true, false, "", true, false},
-		{"environment variable", false, false, "1", true, false},
+		{"interactive terminal", false, "", true, true},
+		{"stderr redirected (cron, pipes)", false, "", false, false},
+		{"flag", true, "", true, false},
+		{"environment variable", false, "1", true, false},
 	} {
-		if got := updateCheckEnabled(tt.noFlag, tt.json, tt.env, tt.stderrIsTerminal); got != tt.want {
+		if got := updateCheckEnabled(tt.noFlag, tt.env, tt.stderrIsTerminal); got != tt.want {
 			t.Errorf("%s: got %v, want %v", tt.name, got, tt.want)
 		}
 	}

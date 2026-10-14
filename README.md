@@ -1,6 +1,6 @@
 # SpeedTaier CLI
 
-基于「全球网测」测速节点的命令行测速工具：按 IP 归属地自动选择本省、本运营商时延最低的节点(本市优先)测速，输出下载、上传、空载时延、抖动、负载时延等指标，支持 JSON 输出。
+基于「全球网测」测速节点的命令行测速工具：按 IP 归属地自动选择本省、本运营商时延最低的节点(本市优先)测速，输出下载、上传、空载时延、抖动、负载时延等指标。
 
 > 本项目为个人开发的非官方工具，与全球网测及其运营方无关。工具调用的是全球网测客户端使用的公开接口，接口变化可能导致工具失效。
 
@@ -12,7 +12,7 @@
 - **时延更真实**：用长连接上的应用层往返测时延，并在传输期间同时测量负载时延(反映缓冲膨胀)。
 - **识别透明代理**：检测到 Surge、Clash、sing-box 等 TUN 模式时，测速流量自动改由物理网卡直接发出，避免结果失真。
 - **IPv4 / IPv6 双栈**：本机有 IPv6 路由时自动加测 IPv6。
-- **适合脚本**：`--json` 输出稳定结构的单行 JSON，带警告编码与退出码。
+- **适合定时任务**：输出不是终端时自动关闭颜色与实时刷新，得到纯文本，并带退出码。
 - **单一静态二进制**：支持 macOS、Linux、Windows，以及 OpenWrt/iStoreOS 等[软路由](#软路由)(x86、ARM)，提供一键安装脚本。
 
 ## 安装
@@ -69,7 +69,7 @@ speedtaier upgrade --check   # 只检查是否有新版本
   INFO    发现新版本 v0.7.0(当前 v0.6.2)，运行 speedtaier upgrade 升级
 ```
 
-下列情况不检查：`--json` 输出、stderr 不是终端(定时任务、管道)、开发构建。也可以用 `--no-update-check` 或环境变量 `SPEEDTAIER_NO_UPDATE_CHECK=1` 关闭。工具不会自动替换自身，升级只在你运行 `upgrade` 时发生。
+下列情况不检查：stderr 不是终端(定时任务、管道)、开发构建。也可以用 `--no-update-check` 或环境变量 `SPEEDTAIER_NO_UPDATE_CHECK=1` 关闭。工具不会自动替换自身，升级只在你运行 `upgrade` 时发生。
 
 访问 GitHub 困难时，设置 `GITHUB_PROXY`(用法同一键安装脚本)让检查与升级走加速地址：
 
@@ -114,7 +114,6 @@ speedtaier --operator all                   # 电信、联通、移动等全部�
 speedtaier --operator dianxin               # 指定运营商(中文、拼音或英文)
 speedtaier list --province guangdong        # 只查看节点及连通性，不测速
 speedtaier upgrade                          # 升级到最新版本
-speedtaier --province jiangsu --json        # 输出 JSON
 ```
 
 省份使用拼音，不区分大小写。注意 **陕西为 `shaanxi`**、山西为 `shanxi`，内蒙古为 `neimenggu`，西藏为 `xizang`。启用 shell 补全后可补全省份：
@@ -156,7 +155,7 @@ speedtaier completion zsh > "${fpath[1]}/_speedtaier"
 | 本机出口 | 本机出口 IP、归属地与运营商，用来选择测速节点 |
 | 测试 | 当前测速的节点：运营商、协议(IPv4 / IPv6)、节点名与地址 |
 | 空闲时延：时延 | 没有传输数据时的往返时延(中位数)。采样期间随每个样本更新，进度条为采样进度 |
-| 采样 | 采样次数，用 `--latency-count` 调整(默认 20)。有失败时同一行多一项失败率(超时、断开的比例，**不等同于丢包率**) |
+| 采样 | 采样次数(固定 20 次)。有失败时同一行多一项失败率(超时、断开的比例，**不等同于丢包率**) |
 | 抖动 | 按时间顺序相邻两次往返时延之差的平均，越小越稳定；至少要两个样本 |
 | 最低 / 最高 | 采样中往返时延的最小值与最大值 |
 | 单线程 / 多线程 | 单线程用 1 条 TCP 连接，多线程用 `--threads` 条(默认 8)，连接数写在标题里。多线程接近线路的总带宽；单线程受延迟和丢包影响更大，二者差距大说明线路上存在单连接瓶颈 |
@@ -229,81 +228,10 @@ speedtaier --interface none    # 按系统路由，即经过代理测速
   ```
 - **CPU 可能成为瓶颈**：性能较弱的设备(如 Cortex-A53 级 ARM)可能跑不满千兆。测速时可用 `top` 观察，CPU 占满说明结果受限于路由器本身。
 - **PPPoE 拨号与代理插件**：PPPoE 的 WAN 口(如 `pppoe-wan`)不会被误判为代理；OpenClash 等插件的 TUN 模式会被识别，测速连接自动绑定 WAN 口绕开代理。只代理局域网设备流量的 iptables/nftables 透明代理不影响路由器自身的测速。
-- **定时测速**：结果按行追加为 JSON。建议指定省份，避免归属地接口异常时无法确定省份。千兆宽带每次测速约消耗 1–1.5 GB 流量(`--no-single` 减半，本机有 IPv6 或使用 `--operator all` 则成倍增加)，请控制频率。以 OpenWrt 为例，执行 `crontab -e` 添加：
+- **定时测速**：输出不是终端时自动输出纯文本(无颜色、无实时刷新)，可以直接追加到日志。建议指定省份，避免归属地接口异常时无法确定省份。千兆宽带每次测速约消耗 1–1.5 GB 流量(`--no-single` 减半，本机有 IPv6 或使用 `--operator all` 则成倍增加)，请控制频率。以 OpenWrt 为例，执行 `crontab -e` 添加：
   ```
-  0 4 * * * /usr/bin/speedtaier --province jiangsu --json >> /root/speedtaier.jsonl 2>/dev/null
+  0 4 * * * /usr/bin/speedtaier --province jiangsu >> /root/speedtaier.log 2>&1
   ```
-
-## JSON 输出
-
-`--json` 向 stdout 输出单行 JSON(便于按行追加到日志文件)，stderr 无输出。示例(节选并格式化)：
-
-```json
-{
-  "schema_version": 1,
-  "version": "v0.6.0",
-  "started_at": "2026-10-14T15:10:10.032+08:00",
-  "duration_ms": 36757,
-  "config": { "province": "shandong", "family": "auto", "interface": "auto", "operator": "auto", "threads": 8, "single_thread": true, "max_seconds": 3, "...": "..." },
-  "client": { "ip": "203.0.113.5", "country": "中国", "province": "山东", "city": "东营", "operator": "电信" },
-  "province": "山东",
-  "operator": "电信",
-  "network": { "interface": "en0", "transparent_proxy": "utun4", "proxy_bypassed": true, "ipv6": false },
-  "candidates": [
-    {
-      "id": "1002", "name": "济南电信", "city": "济南", "operator": "电信",
-      "ipv4": { "address": "58.56.118.126:65499", "status": "ok", "rtt_ms": 22.97 },
-      "ipv6": { "address": "[240e:4e:4000::3]:65499", "status": "skipped" }
-    }
-  ],
-  "tests": [
-    {
-      "operator": "电信", "family": "ipv4", "status": "ok",
-      "node": { "id": "2257001", "name": "东营电信2", "city": "东营", "operator": "电信", "address": "58.58.160.78:65499" },
-      "idle_latency": { "samples": 20, "failed": 0, "fail_rate_pct": 0, "min_ms": 13.31, "median_ms": 15.44, "max_ms": 16.93, "jitter_ms": 1.73 },
-      "download": { "threads": 8, "mbps": 524.9, "bytes": 482294560, "total_ms": 5000, "duration_ms": 3500, "stable": true, "loaded_latency": { "median_ms": 36.1, "...": "..." } },
-      "upload": { "threads": 8, "mbps": 40.7, "bytes": 53683260, "total_ms": 6250, "duration_ms": 3250, "stable": false, "loaded_latency": { "median_ms": 10.4, "...": "..." } },
-      "download_single": { "threads": 1, "mbps": 398.1, "bytes": 352294560, "total_ms": 5000, "duration_ms": 3500, "stable": true, "loaded_latency": { "median_ms": 48.1, "...": "..." } },
-      "upload_single": { "threads": 1, "mbps": 28.3, "bytes": 33683260, "total_ms": 6250, "duration_ms": 3250, "stable": false, "loaded_latency": { "median_ms": 11.2, "...": "..." } }
-    }
-  ],
-  "data_usage_bytes": 415702436,
-  "warnings": [
-    { "code": "proxy_bypassed", "level": "info", "message": "检测到透明代理(utun4)，测速流量改由物理网卡 en0 直接发出(--interface none 可关闭)" }
-  ],
-  "degraded": false,
-  "exit_code": 0
-}
-```
-
-主要字段：
-
-| 字段 | 说明 |
-|---|---|
-| `operator` | 测速的运营商；`--operator all` 或运营商未知时省略 |
-| `candidates[].ipv4/ipv6.status` | `ok`、`unreachable`、`skipped`(本机无该协议路由)、`no_address`(节点无该协议地址) |
-| `tests[].status` | `ok` 或 `failed`；失败时 `error` 给出原因 |
-| `tests[].attempts` | 该运营商此前测速失败的节点及原因 |
-| `download` / `upload` | 多线程结果，`threads` 为所用连接数(`--threads 1` 时就是单线程结果) |
-| `download_single` / `upload_single` | 单线程结果；仅当 `config.single_thread` 为 `true` 时有值 |
-| `download/upload.bytes` · `total_ms` | 传输量与总用时，都含预热期，口径一致 |
-| `download/upload.duration_ms` | 计量时长，不含预热；`mbps` 按它计算 |
-| `download/upload.stable` | 吞吐收敛后提前结束为 `true`，跑满最长时长为 `false`(单线程字段同) |
-| `data_usage_bytes` | 本次运行消耗的流量(含失败重试与预热) |
-| `degraded` | 有测速失败或存在 `warn` 级别警告时为 `true` |
-
-`warnings[].code` 取值：
-
-| code | 级别 | 含义 |
-|---|---|---|
-| `proxy_bypassed` | info | 检测到透明代理，已绑定物理网卡绕开 |
-| `transparent_proxy` | warn | 测速经过透明代理，时延与上传结果可能失真 |
-| `operator_unknown` | info | 无法按归属地确定本机运营商(归属地查询失败或该省没有本机运营商的节点)，不区分运营商测时延最低的节点 |
-| `node_fallback` | info | 节点测速失败，已换下一节点 |
-| `ipv6_lookup_failed` | warn | 部分运营商的 IPv6 节点获取失败 |
-| `interrupted` | warn | 用户中断 |
-
-`schema_version` 在字段含义发生不兼容变化时递增。
 
 ## 退出码
 
@@ -311,7 +239,7 @@ speedtaier --interface none    # 按系统路由，即经过代理测速
 |---|---|
 | 0 | 全部成功 |
 | 1 | 启动失败或参数错误 |
-| 2 | 部分测试失败，或存在 `warn` 级别警告 |
+| 2 | 部分测试失败，或存在 `WARNING` 警告 |
 | 130 | 用户中断 |
 
 ## 参数
@@ -322,11 +250,9 @@ speedtaier --interface none    # 按系统路由，即经过代理测速
 | `--family` | `auto` | `auto`(本机有 IPv6 时加测 IPv6)、`4`、`6` |
 | `--operator` | `auto` | `auto`(本机运营商，按 IP 归属地)、`all`(全部运营商)或运营商名，如 `电信`、`liantong`、`mobile` |
 | `--interface` | `auto` | `auto`、`none` 或网卡名，见[透明代理](#透明代理) |
-| `--json` | | 输出 JSON |
 | `--seconds` | `10` | 每阶段最长计量秒数(不含预热)，吞吐稳定后提前结束 |
 | `--threads` | `8` | 多线程测速的并发连接数；`1` 表示只测单线程 |
 | `--no-single` | | 不测单线程，只测多线程 |
-| `--latency-count` | `20` | 空载时延采样次数，抖动按这些样本计算 |
 | `--timeout` | `0` | 单节点总超时秒，0 表示按测速时长自动计算 |
 | `--no-download` / `--no-upload` | | 跳过下载 / 上传 |
 | `--no-progress` | | 关闭实时进度 |
@@ -365,7 +291,7 @@ go test -run='^$' -fuzz='^FuzzParseNodes$' -fuzztime=30s ./internal/taier   # �
 ```
 cmd/speedtaier/  程序入口
 internal/
-  cli/       命令行参数、终端界面、JSON 输出
+  cli/       命令行参数、终端界面、升级
   runner/    编排：选省份与运营商 → 选出口网卡 → 探测 → 按运营商测速；产出 Result
   taier/     全球网测协议与测速引擎(计量、时延、探测)
   netx/      平台相关网络能力：绑定网卡、查路由表、检测透明代理

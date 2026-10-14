@@ -2,10 +2,8 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
 	"strconv"
@@ -51,18 +49,15 @@ type config struct {
 	iface    string
 	operator string
 
-	threads      int
-	seconds      int
-	timeout      int
-	latencyCount int
+	threads int
+	seconds int
+	timeout int
 
-	imei          string
 	noDownload    bool
 	noUpload      bool
 	noSingle      bool
 	noProgress    bool
 	noUpdateCheck bool
-	json          bool
 }
 
 type app struct {
@@ -107,7 +102,6 @@ func (a *app) newRootCmd() *cobra.Command {
 	pf.StringVar(&a.cfg.province, "province", "", "省份拼音，如 jiangsu、shandong；不指定时按 IP 归属地")
 	pf.StringVar(&a.cfg.iface, "interface", runner.InterfaceAuto,
 		"测速使用的网卡: auto(检测到透明代理时自动绑定物理网卡)、none(按系统路由)或网卡名如 en0")
-	pf.BoolVar(&a.cfg.json, "json", false, "向 stdout 输出单个 JSON 文档(不显示进度)")
 	pf.BoolVar(&a.cfg.noProgress, "no-progress", false, "关闭实时进度")
 	pf.BoolVar(&a.cfg.noUpdateCheck, "no-update-check", false, "不检查新版本(也可设置环境变量 "+noUpdateCheckEnv+"=1)")
 	_ = cmd.RegisterFlagCompletionFunc("province",
@@ -120,11 +114,9 @@ func (a *app) newRootCmd() *cobra.Command {
 	f.IntVar(&a.cfg.threads, "threads", 8, "多线程测速的并发连接数；1 表示只测单线程")
 	f.IntVar(&a.cfg.seconds, "seconds", 10, "每阶段最长计量秒数(不含预热)；吞吐稳定后提前结束")
 	f.IntVar(&a.cfg.timeout, "timeout", 0, "单节点总超时秒，0 表示按测速时长自动计算")
-	f.IntVar(&a.cfg.latencyCount, "latency-count", 20, "空载时延采样次数(抖动按这些样本计算)")
 	f.BoolVar(&a.cfg.noSingle, "no-single", false, "不测单线程，只测多线程(--threads 条连接)")
 	f.BoolVar(&a.cfg.noDownload, "no-download", false, "跳过下载测速")
 	f.BoolVar(&a.cfg.noUpload, "no-upload", false, "跳过上传测速")
-	f.StringVar(&a.cfg.imei, "imei", "", "固定 IMEI(调试用)")
 	_ = cmd.RegisterFlagCompletionFunc("family",
 		cobra.FixedCompletions([]string{"auto", "4", "6"}, cobra.ShellCompDirectiveNoFileComp))
 	_ = cmd.RegisterFlagCompletionFunc("operator",
@@ -163,16 +155,6 @@ func (a *app) run(ctx context.Context, surveyOnly bool) error {
 		Operator:   a.cfg.operator,
 		Test:       opts,
 		SurveyOnly: surveyOnly,
-		Version:    readBuildInfo().Version,
-	}
-
-	if a.cfg.json {
-		res := runner.Run(ctx, cfg, runner.Discard)
-		if err := writeJSON(os.Stdout, res); err != nil {
-			fmt.Fprintf(os.Stderr, "输出 JSON 失败: %v\n", err)
-			return exitCode(runner.ExitFailed)
-		}
-		return exitWith(res.ExitCode)
 	}
 
 	current := readBuildInfo().Version
@@ -187,20 +169,13 @@ func (a *app) run(ctx context.Context, surveyOnly bool) error {
 	return exitWith(res.ExitCode)
 }
 
-// writeJSON 输出单行 JSON，便于按行追加到日志文件(JSON Lines)。
-func writeJSON(w io.Writer, v any) error {
-	enc := json.NewEncoder(w)
-	enc.SetEscapeHTML(false)
-	return enc.Encode(v)
-}
-
 // testOptions 校验测速参数并转换为 taier.Options。
 func (a *app) testOptions() (taier.Options, error) {
 	c := a.cfg
 	for _, p := range []struct {
 		name  string
 		value int
-	}{{"threads", c.threads}, {"seconds", c.seconds}, {"latency-count", c.latencyCount}} {
+	}{{"threads", c.threads}, {"seconds", c.seconds}} {
 		if p.value < 1 {
 			return taier.Options{}, fmt.Errorf("--%s 必须大于 0", p.name)
 		}
@@ -213,9 +188,7 @@ func (a *app) testOptions() (taier.Options, error) {
 		Threads:      c.threads,
 		SingleThread: !c.noSingle,
 		Seconds:      c.seconds,
-		LatencyCount: c.latencyCount,
 		Timeout:      time.Duration(c.timeout) * time.Second,
-		IMEI:         c.imei,
 		SkipDownload: c.noDownload,
 		SkipUpload:   c.noUpload,
 	}
