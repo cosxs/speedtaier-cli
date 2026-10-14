@@ -97,7 +97,7 @@ func TestProbe(t *testing.T) {
 	}
 	cands := Probe(context.Background(), Dialer{}, nodes, IPv4)
 
-	if r := cands[0].V4; r.State != ReachOK || r.RTT <= 0 {
+	if r := cands[0].V4; r.State != ReachOK || r.RTT < 0 {
 		t.Errorf("up.V4 = %+v, want reachable", r)
 	}
 	if r := cands[0].V6; r.State != ReachSkipped {
@@ -124,7 +124,8 @@ func TestMeasureLatency(t *testing.T) {
 
 	addr := srv.Listener.Addr().String()
 	st := measureLatency(context.Background(), Dialer{}, addr, 5, time.Second)
-	if st.Samples != 5 || st.Failed != 0 || st.Median <= 0 || st.Min > st.Median || st.Median > st.Max {
+	// 不要求时延大于 0：Windows 时钟精度较低，本机回环的往返可能测得 0。
+	if st.Samples != 5 || st.Failed != 0 || st.Min < 0 || st.Min > st.Median || st.Median > st.Max {
 		t.Errorf("got %+v, want 5 samples without failures", st)
 	}
 	if n := conns.Load(); n != 1 {
